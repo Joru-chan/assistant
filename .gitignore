@@ -53,6 +53,10 @@ env/
 logs/
 *.log.*
 
+# Local queues
+memory/
+memory/*.jsonl
+
 # Database
 *.db
 *.sqlite

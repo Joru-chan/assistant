@@ -60,16 +60,25 @@ codex exec "Create a Notion database named 'Tool Requests / Friction Log' under 
 5. Record the database ID and URL in `CONTEXT.md`.
 
 ### Quick add from terminal
-- Set the DB ID once (local only):
+This is the canonical capture interface (terminal + Poke). It writes to Notion via MCP and falls back to a local queue if MCP is unavailable.
+
+- Set the DB ID once (local only, optional if `CONTEXT.md` is filled in):
   - `export TOOL_REQUESTS_DB_ID="paste_db_id_here"`
-- Create an entry:
-  - `python scripts/tool_requests_log.py --title "Annoyed by X" --description "What happened" --desired "What good looks like" --frequency weekly --impact medium --domain "email,planning"`
+- Minimal capture (one-liner complaint):
+  - `python scripts/capture_tool_request.py "Annoyed by calendar invite spam"`
+- Full capture:
+  - `python scripts/capture_tool_request.py "Annoyed by calendar invite spam" --desired-outcome "Auto-filter spammy invites" --domain "calendar,email" --frequency daily --impact medium`
+
+### Offline mode (queue)
+- If MCP is down, entries are queued at `memory/tool_requests_queue.jsonl`.
+- Flush later:
+  - `python scripts/flush_tool_requests_queue.py`
 
 ### Smoke test
 - List five most recent entries:
   - `codex exec "List the 5 most recent items from the Tool Requests / Friction Log database <TOOL_REQUESTS_DB_ID> and show Title, Status, Frequency, Impact, and Created time."`
 - Create a test entry, then archive it:
-  - `python scripts/tool_requests_log.py --title "Test item - delete" --description "smoke test" --desired "verify create works" --frequency once --impact low --domain "other" --source terminal`
+  - `python scripts/capture_tool_request.py "Test item - delete" --desired-outcome "verify capture works" --domain "other" --source terminal`
   - `codex exec "Find the most recent Tool Requests entry with title 'Test item - delete' and archive it."`
 
 ## 5) Google Workspace MCP (`mcp-gsuite-enhanced`)
