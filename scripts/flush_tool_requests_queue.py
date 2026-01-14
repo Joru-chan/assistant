@@ -133,7 +133,14 @@ def main() -> int:
 
     for entry in entries:
         prompt = _build_prompt(db_id, entry)
-        result = _send_to_notion(prompt)
+        try:
+            result = _send_to_notion(prompt)
+        except FileNotFoundError:
+            print(
+                "codex CLI not found; queue retained. Install Codex or add it to PATH.",
+                file=sys.stderr,
+            )
+            return 1
         if result.returncode == 0:
             continue
         failures += 1
