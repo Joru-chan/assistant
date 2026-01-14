@@ -26,6 +26,7 @@ The personal system is centered around the Life Atlas database and an “Assista
 ## Scripts
 - `scripts/personal_task_analyzer.py`: Optional task analysis for the Personal Tasks database.
 - `scripts/personal_project_analyzer.py`: Optional analysis for the Projects database.
+- `scripts/tool_requests_log.py`: Quick entry helper for the Tool Requests / Friction Log backlog.
 - `scripts/work_task_analyzer.py`: Legacy and deprecated (work-focused). Kept for reference only.
 
 ## Templates

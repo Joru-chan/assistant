@@ -28,7 +28,51 @@ This file documents how to run this assistant from the terminal using Codex CLI.
   - `codex exec "List my Notion databases"`
 - [ ] Ensure the Life Atlas database is shared with the integration (used as the personal taxonomy).
 
-## 4) Google Workspace MCP (`mcp-gsuite-enhanced`)
+## 4) Tool Requests / Friction Log backlog (Notion)
+
+This backlog captures friction points and automation ideas. Preferred location: under the Life Atlas “Assistant HQ” page.
+
+### Schema
+- Title (title)
+- Description (rich_text)
+- Desired outcome (rich_text)
+- Frequency (select): once / weekly / daily / many-times-per-day
+- Impact (select): low / medium / high
+- Domain (multi_select): email, calendar, notion, health, errands, planning, admin, relationships, home, finance, other
+- Status (select): new / triaging / spec-ready / building / shipped / won't-do
+- Source (select): poke / terminal / other
+- Created time (created_time)
+- Last updated time (last_edited_time)
+- Link(s) (url)
+- Notes / constraints (rich_text)
+
+### Create via Codex (MCP)
+Run from this repo root and use the Assistant HQ page ID from `CONTEXT.md`:
+```bash
+codex exec "Create a Notion database named 'Tool Requests / Friction Log' under page_id <ASSISTANT_HQ_PAGE_ID> with properties: Title (title), Description (rich_text), Desired outcome (rich_text), Frequency (select: once, weekly, daily, many-times-per-day), Impact (select: low, medium, high), Domain (multi_select: email, calendar, notion, health, errands, planning, admin, relationships, home, finance, other), Status (select: new, triaging, spec-ready, building, shipped, won't-do), Source (select: poke, terminal, other), Created time (created_time), Last updated time (last_edited_time), Link(s) (url), Notes / constraints (rich_text). Return the database ID and URL."
+```
+
+### Create manually (Notion UI)
+1. Open the Life Atlas “Assistant HQ” page in Notion.
+2. Add a new database named “Tool Requests / Friction Log”.
+3. Add the properties listed in the schema above (matching names and types).
+4. Share the database with the Notion integration.
+5. Record the database ID and URL in `CONTEXT.md`.
+
+### Quick add from terminal
+- Set the DB ID once (local only):
+  - `export TOOL_REQUESTS_DB_ID="paste_db_id_here"`
+- Create an entry:
+  - `python scripts/tool_requests_log.py --title "Annoyed by X" --description "What happened" --desired "What good looks like" --frequency weekly --impact medium --domain "email,planning"`
+
+### Smoke test
+- List five most recent entries:
+  - `codex exec "List the 5 most recent items from the Tool Requests / Friction Log database <TOOL_REQUESTS_DB_ID> and show Title, Status, Frequency, Impact, and Created time."`
+- Create a test entry, then archive it:
+  - `python scripts/tool_requests_log.py --title "Test item - delete" --description "smoke test" --desired "verify create works" --frequency once --impact low --domain "other" --source terminal`
+  - `codex exec "Find the most recent Tool Requests entry with title 'Test item - delete' and archive it."`
+
+## 5) Google Workspace MCP (`mcp-gsuite-enhanced`)
 Repository location: `mcp-gsuite-enhanced/` (from this repo root).
 
 - [ ] Clone if missing:
@@ -53,7 +97,7 @@ Repository location: `mcp-gsuite-enhanced/` (from this repo root).
   - `codex exec "List my calendars"`
   - `codex exec "Show my unread emails"`
 
-## 5) Local task analysis scripts (optional)
+## 6) Local task analysis scripts (optional)
 - [ ] `source venv/bin/activate && python scripts/work_task_analyzer.py`
 - [ ] `source venv/bin/activate && python scripts/personal_task_analyzer.py`
 - [ ] `source venv/bin/activate && python scripts/personal_project_analyzer.py`

@@ -5,7 +5,7 @@ Last updated: 2026-01-14
 ## Purpose
 - Personal assistant for Jordane Frechet using Codex CLI.
 - Personal-life focus; work/career is treated as a personal category, not a separate system.
-- Canonical behavior lives in `CLAUDE.md` (despite the name).
+- `AGENTS.md` is the primary instruction source; `CLAUDE.md` is a workflow reference.
 
 ## Identity
 - Name: Jordane Frechet
@@ -22,6 +22,8 @@ Last updated: 2026-01-14
 - Health & Medical: `2e85ae60-7903-8102-98e4-d5575108a601`
 - Finance & Bills: `2e85ae60-7903-81a7-bc63-e7516f555620`
 - Daily Log: `2e85ae60-7903-813a-9a32-ecd7ed4f3507`
+- Tool Requests / Friction Log DB ID: `2e85ae60-7903-8040-809e-ed82409e73d0`
+- Tool Requests / Friction Log DB URL: `https://www.notion.so/2e85ae6079038040809eed82409e73d0?v=2e85ae60790380708681000c66e3c423`
 
 ## MCP Integrations
 - Notion MCP: `notion-mcp` configured via `codex mcp add`.
