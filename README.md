@@ -14,6 +14,25 @@ This repository configures Codex CLI as a personal assistant with Notion and Goo
 2. Open `CLAUDE.md` to adjust workflows; use `profile.md` and `SETUP_CODEX.md` for IDs and integration config.
 3. Run Codex with this repo as the working directory.
 
+## One Entrypoint: scripts/agent.py
+Use the universal router to translate natural language into actions:
+- `python scripts/agent.py "show tool requests"`
+- `python scripts/agent.py "search wishes for calendar conflicts"`
+- `python scripts/agent.py "what should we build next?"`
+- `python scripts/agent.py "In Notion, change title \"Old\" to \"New\""`
+- `python scripts/agent.py "In Notion, set status triaging for \"Receipt photo\""`
+- `python scripts/agent.py "start a new project from my wishes" --execute`
+- `python scripts/agent.py "deploy latest changes to the VM" --execute`
+
+## Notion Editor (safe-by-default)
+- Preview updates (no writes):
+  - `python scripts/agent.py "In Notion, change title \"Old\" to \"New\""`
+- Apply updates (explicit):
+  - `python scripts/agent.py "In Notion, change title \"Old\" to \"New\"" --execute`
+- Low-level MCP calls:
+  - `./vm/mcp_curl.sh notion_search '{"query":"Receipt photo","limit":5}'`
+  - `./vm/mcp_curl.sh notion_update_page '{"page_id":"<id>","updates":{"title":"New title"},"dry_run":true}'`
+
 ## Notion Structure (Personal)
 The personal system is centered around the Life Atlas database and an “Assistant HQ” page that contains child databases:
 - Personal Tasks
@@ -24,6 +43,8 @@ The personal system is centered around the Life Atlas database and an “Assista
 - Daily Log
 
 ## Scripts
+- `scripts/agent.py`: Universal router for natural language requests.
+- `scripts/triage.py`: Lightweight triage via the VM MCP endpoint.
 - `scripts/personal_task_analyzer.py`: Optional task analysis for the Personal Tasks database.
 - `scripts/personal_project_analyzer.py`: Optional analysis for the Projects database.
 - `scripts/tool_requests_log.py`: Quick entry helper for the Tool Requests / Friction Log backlog.

@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +22,8 @@ try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - optional dependency
     load_dotenv = None
+
+from utils.progress import print_ok, print_warn, run_command
 
 QUEUE_PATH = Path("memory/tool_requests_queue.jsonl")
 CONTEXT_PATH = Path("CONTEXT.md")
@@ -102,13 +103,12 @@ def _build_prompt(db_id: str, entry: Dict[str, Any]) -> str:
     )
 
 
-def _send_to_notion(prompt: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def _send_to_notion(prompt: str, verbose: bool, progress: bool) -> tuple[int, str]:
+    return run_command(
         ["codex", "exec", prompt],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=os.environ.copy(),
+        label="Notion MCP: create tool request",
+        verbose=verbose,
+        progress=progress,
     )
 
 
@@ -118,6 +118,13 @@ def main() -> int:
     )
     parser.add_argument("complaint", help="Short complaint or friction note")
     parser.add_argument("--desired-outcome")
+    parser.add_argument("--verbose", action="store_true", help="Show verbose output.")
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable progress spinners.",
+    )
     parser.add_argument(
         "--frequency",
         default="once",
@@ -173,23 +180,24 @@ def main() -> int:
     prompt = _build_prompt(db_id, entry)
 
     try:
-        result = _send_to_notion(prompt)
+        returncode, output = _send_to_notion(
+            prompt, verbose=args.verbose, progress=args.progress
+        )
     except FileNotFoundError:
         _queue_entry(entry)
         print("codex CLI not found; queued entry locally.")
         return 1
 
-    if result.returncode == 0:
-        output = (result.stdout or "").strip()
-        print(output or "Captured tool request in Notion.")
+    if returncode == 0:
+        output = (output or "").strip()
+        print_ok(output or "Captured tool request in Notion.")
         return 0
 
     _queue_entry(entry)
-    error = (result.stderr or "").strip()
-    if error:
-        print(f"Notion capture failed; queued entry. Error: {error}")
+    if output:
+        print_warn(f"Notion capture failed; queued entry. Error: {output.strip()}")
     else:
-        print("Notion capture failed; queued entry.")
+        print_warn("Notion capture failed; queued entry.")
     return 1
 
 

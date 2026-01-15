@@ -15,6 +15,19 @@ This file documents how to run this assistant from the terminal using Codex CLI.
   - `source venv/bin/activate`
   - `pip install -r requirements.txt`
 
+## 2.5) Universal router (scripts/agent.py)
+This is the single entrypoint for natural language requests.
+
+- List or search tool requests:
+  - `python scripts/agent.py "show tool requests"`
+  - `python scripts/agent.py "search wishes for calendar conflicts"`
+- Pick what to build next:
+  - `python scripts/agent.py "what should we build next?"`
+- Scaffold a new tool (writes files, requires `--execute`):
+  - `python scripts/agent.py "start a new project from my wishes" --execute`
+- Deploy to VM (writes, requires `--execute`):
+  - `python scripts/agent.py "deploy latest changes to the VM" --execute`
+
 ## 3) Notion MCP (`notion-mcp`)
 - [ ] Set the token in your shell (local only, do not commit):
   - `export NOTION_TOKEN="paste_token_here"`
@@ -91,6 +104,28 @@ This is the canonical capture interface (terminal + Poke). It writes to Notion v
 - Output:
   - Report saved to `memory/triage/YYYY-MM-DD.md`
 
+### Calendar Hygiene Assistant (tool prototype)
+- Generate a plan (read-only):
+  - `python tools/calendar_hygiene/calendar_hygiene.py plan`
+- Verbose plan (debug heuristics):
+  - `python tools/calendar_hygiene/calendar_hygiene.py plan --verbose`
+- Apply selected actions:
+  - `python tools/calendar_hygiene/calendar_hygiene.py apply --plan-id YYYY-MM-DD --actions act-xxxx,act-yyyy`
+- Apply dry-run (no writes):
+  - `python tools/calendar_hygiene/calendar_hygiene.py apply --plan-id YYYY-MM-DD --actions act-xxxx --dry-run`
+- Plan output:
+  - `memory/plans/calendar_hygiene/YYYY-MM-DD.json`
+- Poke hookup (later):
+  - Run `plan`, read the JSON, then call `apply` with explicit action IDs.
+
+### Generate a tool spec (on-demand)
+- From a complaint string:
+  - `python scripts/generate_tool_spec.py "Annoyed by calendar invite spam"`
+- From a Notion item ID:
+  - `python scripts/generate_tool_spec.py --notion-id <page_id>`
+- Optional JSON output:
+  - `python scripts/generate_tool_spec.py "Annoyed by calendar invite spam" --format both`
+
 ## 5) Google Workspace MCP (`mcp-gsuite-enhanced`)
 Repository location: `mcp-gsuite-enhanced/` (from this repo root).
 
@@ -125,3 +160,5 @@ Repository location: `mcp-gsuite-enhanced/` (from this repo root).
 - Do not commit secrets. Keep tokens in env vars and auth files in `mcp-gsuite-enhanced/`.
 - When credentials or OAuth are required, stop and ask before pasting or running anything.
 - Update `CONTEXT.md` whenever IDs, paths, or setup decisions change.
+- If a script seems stuck, re-run with `--verbose` to stream Codex output.
+- Disable spinners with `--no-progress` if you want plain logs.

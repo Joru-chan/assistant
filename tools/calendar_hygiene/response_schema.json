@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Calendar Hygiene MCP Response",
+  "type": "object",
+  "required": ["summary", "result", "next_actions", "errors"],
+  "properties": {
+    "summary": { "type": "string" },
+    "result": { "type": "object" },
+    "next_actions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

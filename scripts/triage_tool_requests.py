@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -109,21 +108,21 @@ def _read_db_id() -> str | None:
     return match.group(1) if match else None
 
 
-def _run_codex(prompt: str) -> str:
+def _run_codex(prompt: str, *, label: str, verbose: bool, progress: bool) -> str:
+    from utils.progress import run_command
+
     try:
-        result = subprocess.run(
+        returncode, output = run_command(
             ["codex", "exec", prompt],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=os.environ.copy(),
+            label=label,
+            verbose=verbose,
+            progress=progress,
         )
     except FileNotFoundError:
         raise SystemExit("codex CLI not found on PATH.")
-    if result.returncode != 0:
-        error = (result.stderr or "").strip()
-        raise SystemExit(f"codex exec failed: {error or 'unknown error'}")
-    return (result.stdout or "").strip()
+    if returncode != 0:
+        raise SystemExit(f"codex exec failed: {output or 'unknown error'}")
+    return output.strip()
 
 
 def _extract_json(text: str) -> Any:
@@ -136,7 +135,7 @@ def _extract_json(text: str) -> Any:
         return json.loads(match.group(1))
 
 
-def _query_items(db_id: str) -> List[Dict[str, Any]]:
+def _query_items(db_id: str, verbose: bool, progress: bool) -> List[Dict[str, Any]]:
     prompt = (
         "Using the Notion MCP, query the database "
         f"{db_id} where Status is 'new' or 'triaging'. "
@@ -146,7 +145,12 @@ def _query_items(db_id: str) -> List[Dict[str, Any]]:
         "id, url, title, description, desired_outcome, frequency, impact, "
         "domain (array), status, last_edited_time, created_time."
     )
-    output = _run_codex(prompt)
+    output = _run_codex(
+        prompt,
+        label="Notion MCP: query tool requests",
+        verbose=verbose,
+        progress=progress,
+    )
     data = _extract_json(output)
     if isinstance(data, dict) and "results" in data:
         return data["results"]
@@ -377,7 +381,9 @@ def _write_report(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _apply_triage_updates(items: Iterable[TriageItem]) -> None:
+def _apply_triage_updates(
+    items: Iterable[TriageItem], verbose: bool, progress: bool
+) -> None:
     for item in items:
         if item.status != "new":
             continue
@@ -385,7 +391,12 @@ def _apply_triage_updates(items: Iterable[TriageItem]) -> None:
             "Using the Notion MCP, set Status to 'triaging' "
             f"for the page {item.page_id}."
         )
-        _run_codex(prompt)
+        _run_codex(
+            prompt,
+            label="Notion MCP: update status",
+            verbose=verbose,
+            progress=progress,
+        )
 
 
 def _build_report(
@@ -434,6 +445,13 @@ def main() -> int:
         action="store_true",
         help="Update Status from new -> triaging in Notion.",
     )
+    parser.add_argument("--verbose", action="store_true", help="Show verbose output.")
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable progress spinners.",
+    )
 
     args = parser.parse_args()
     _load_env()
@@ -446,7 +464,7 @@ def main() -> int:
         )
         return 2
 
-    raw_items = _query_items(db_id)
+    raw_items = _query_items(db_id, verbose=args.verbose, progress=args.progress)
     items = [_normalize_item(item) for item in raw_items]
 
     for item in items:
@@ -476,7 +494,7 @@ def main() -> int:
     _write_report(report_path, report)
 
     if args.apply:
-        _apply_triage_updates(selected)
+        _apply_triage_updates(selected, verbose=args.verbose, progress=args.progress)
 
     themes = ", ".join(
         theme

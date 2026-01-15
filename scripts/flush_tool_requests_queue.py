@@ -8,10 +8,10 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -20,6 +20,8 @@ try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - optional dependency
     load_dotenv = None
+
+from utils.progress import print_ok, print_warn, run_command
 
 QUEUE_PATH = Path("memory/tool_requests_queue.jsonl")
 CONTEXT_PATH = Path("CONTEXT.md")
@@ -71,13 +73,12 @@ def _build_prompt(db_id: str, entry: Dict[str, Any]) -> str:
     )
 
 
-def _send_to_notion(prompt: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def _send_to_notion(prompt: str, verbose: bool, progress: bool) -> tuple[int, str]:
+    return run_command(
         ["codex", "exec", prompt],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=os.environ.copy(),
+        label="Notion MCP: create tool request",
+        verbose=verbose,
+        progress=progress,
     )
 
 
@@ -109,6 +110,18 @@ def _write_queue(entries: List[Dict[str, Any]]) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Flush queued Tool Requests into Notion via Codex MCP."
+    )
+    parser.add_argument("--verbose", action="store_true", help="Show verbose output.")
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable progress spinners.",
+    )
+    args = parser.parse_args()
+
     _load_env()
     if not os.getenv("NOTION_TOKEN"):
         print(
@@ -134,14 +147,16 @@ def main() -> int:
     for entry in entries:
         prompt = _build_prompt(db_id, entry)
         try:
-            result = _send_to_notion(prompt)
+            returncode, output = _send_to_notion(
+                prompt, verbose=args.verbose, progress=args.progress
+            )
         except FileNotFoundError:
             print(
                 "codex CLI not found; queue retained. Install Codex or add it to PATH.",
                 file=sys.stderr,
             )
             return 1
-        if result.returncode == 0:
+        if returncode == 0:
             continue
         failures += 1
         remaining.append(entry)
@@ -149,10 +164,12 @@ def main() -> int:
     _write_queue(remaining)
 
     if failures:
-        print(f"Flushed with {failures} failure(s); remaining items kept in queue.")
+        print_warn(
+            f"Flushed with {failures} failure(s); remaining items kept in queue."
+        )
         return 1
 
-    print("Flushed all queued entries.")
+    print_ok("Flushed all queued entries.")
     return 0
 
 
