@@ -13,10 +13,11 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from prefs import load_prefs, save_prefs
 
 ROUTE_LIST = ("list wishes", "show tool requests", "list tool requests", "show wishes")
 ROUTE_PICK = ("pick", "choose", "what to build", "next tool", "triage", "what should we build")
@@ -35,6 +36,35 @@ EDIT_NOTION_KEYWORDS = (
     "add tag",
     "remove tag",
 )
+PREFS_KEYWORDS = ("auto apply", "auto-apply")
+LAST_PREVIEW_PATH = Path("memory/last_preview.json")
+PREVIEW_TTL_HOURS = 24
+STOPWORDS = {
+    "the",
+    "and",
+    "or",
+    "to",
+    "a",
+    "an",
+    "of",
+    "in",
+    "for",
+    "with",
+    "is",
+    "are",
+    "be",
+    "it",
+    "this",
+    "that",
+    "my",
+    "your",
+    "from",
+    "on",
+    "by",
+    "as",
+    "at",
+    "like",
+}
 
 
 def _slugify(text: str) -> str:
@@ -58,8 +88,13 @@ def _run_command(cmd: List[str]) -> Dict[str, Any]:
     }
 
 
+def _extract_quoted_phrases(text: str) -> List[str]:
+    matches = re.finditer(r"(?:^|\s|:)[\"']([^\"']+)[\"']", text)
+    return [match.group(1).strip() for match in matches if match.group(1).strip()]
+
+
 def _extract_search_query(text: str) -> str:
-    quoted = re.findall(r'"([^"]+)"', text) + re.findall(r"'([^']+)'", text)
+    quoted = _extract_quoted_phrases(text)
     if quoted:
         return quoted[0]
     match = re.search(
@@ -86,6 +121,18 @@ def _extract_page_id(text: str) -> str | None:
     return None
 
 
+def _should_set_prefs(request: str) -> bool:
+    lower = request.lower()
+    return any(keyword in lower for keyword in PREFS_KEYWORDS)
+
+
+def _should_correct_tool_request(request: str) -> bool:
+    lower = request.lower()
+    if "tool request" in lower or "tool requests" in lower or "friction log" in lower:
+        return any(word in lower for word in ("fix", "correct", "change", "update", "edit"))
+    return False
+
+
 def _should_edit_notion(request: str) -> bool:
     lower = request.lower()
     if "notion" not in lower:
@@ -93,10 +140,133 @@ def _should_edit_notion(request: str) -> bool:
     return any(keyword in lower for keyword in EDIT_NOTION_KEYWORDS)
 
 
+def _tokenize(text: str) -> List[str]:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return [token for token in tokens if token and token not in STOPWORDS]
+
+
+def _save_last_preview(payload: Dict[str, Any]) -> None:
+    LAST_PREVIEW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAST_PREVIEW_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _load_last_preview() -> Dict[str, Any] | None:
+    if not LAST_PREVIEW_PATH.exists():
+        return None
+    return json.loads(LAST_PREVIEW_PATH.read_text(encoding="utf-8"))
+
+
+def _preview_is_fresh(timestamp: str) -> bool:
+    try:
+        dt = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return False
+    age = datetime.now(timezone.utc) - dt
+    return age.total_seconds() <= PREVIEW_TTL_HOURS * 3600
+
+
+def _parse_correction_request(request: str) -> Tuple[str | None, str | None]:
+    quoted = _extract_quoted_phrases(request)
+    if len(quoted) >= 2:
+        return quoted[0], quoted[1]
+    match = re.search(
+        r"(?:change|correct|fix|update)\s+(.+?)\s+to\s+(.+)",
+        request,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return None, None
+
+
+def _replace_case_insensitive(text: str, old: str, new: str) -> str:
+    pattern = re.compile(re.escape(old), flags=re.IGNORECASE)
+    if not pattern.search(text):
+        return new
+    return pattern.sub(new, text, count=1)
+
+
+def _simplify_query(text: str) -> str:
+    tokens = _tokenize(text)
+    if "physical" in tokens and "items" in tokens:
+        return "physical items"
+    if len(tokens) >= 2:
+        return " ".join(tokens[:2])
+    return tokens[0] if tokens else ""
+
+
+def _compute_confidence(
+    request: str,
+    candidate: Dict[str, Any],
+    candidates: List[Dict[str, Any]],
+    old_phrase: str | None,
+) -> Tuple[float, List[Dict[str, Any]]]:
+    score = 0.0
+    breakdown: List[Dict[str, Any]] = []
+    title = str(candidate.get("title") or "")
+    lower = request.lower()
+
+    if old_phrase and old_phrase.lower() in title.lower():
+        score += 0.45
+        breakdown.append(
+            {
+                "rule": "quoted_phrase_match",
+                "score": 0.45,
+                "details": f"Matched '{old_phrase}' in title.",
+            }
+        )
+
+    candidate_index = next(
+        (idx for idx, item in enumerate(candidates) if item is candidate),
+        None,
+    )
+    if candidate_index is not None and candidate_index <= 1:
+        score += 0.20
+        breakdown.append(
+            {
+                "rule": "recency_bonus",
+                "score": 0.20,
+                "details": "Candidate is among the two newest results.",
+            }
+        )
+
+    if ("not " in lower and " but " in lower) or ("instead of" in lower) or ("misinterpreted" in lower):
+        score += 0.20
+        breakdown.append(
+            {
+                "rule": "negation_pattern",
+                "score": 0.20,
+                "details": "Detected correction/negation phrasing.",
+            }
+        )
+
+    request_tokens = set(_tokenize(request))
+    candidate_tokens = set(_tokenize(title))
+    overlap = request_tokens.intersection(candidate_tokens)
+    if len(overlap) >= 2:
+        score += 0.15
+        breakdown.append(
+            {
+                "rule": "keyword_overlap",
+                "score": 0.15,
+                "details": f"Overlapping tokens: {', '.join(sorted(overlap))}.",
+            }
+        )
+
+    score = max(0.0, min(score, 1.0))
+    return score, breakdown
+
+
 def _route(request: str, force_scaffold: bool) -> Tuple[str, Dict[str, Any]]:
     lower = request.lower()
     if force_scaffold:
         return "scaffold", {}
+    if lower.strip() in ("apply that", "apply last preview", "apply last correction"):
+        return "apply_last", {}
+    if _should_set_prefs(request):
+        return "prefs", {}
+    if _should_correct_tool_request(request):
+        return "correct_tool_request", {}
     call_match = re.match(
         r"^\s*call\s+([a-z0-9_-]+)\s*(\{.*\})?\s*$",
         request,
@@ -161,10 +331,10 @@ def _parse_mcp_response(raw: str) -> Dict[str, Any]:
 
 def _run_mcp_tool(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     cmd = ["./vm/mcp_curl.sh", tool, json.dumps(args)]
-    result = _run_command(cmd)
-    if result["returncode"] != 0:
-        raise RuntimeError(result["stderr"] or "MCP tool call failed")
-    return _parse_mcp_response(result["stdout"])
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "MCP tool call failed")
+    return _parse_mcp_response(result.stdout)
 
 
 def _extract_edit_query(request: str) -> str:
@@ -213,6 +383,36 @@ def _parse_edit_intent(request: str) -> Tuple[Dict[str, Any], List[str]]:
         notes.append("No update intent detected; specify title/status/description/tag.")
 
     return updates, notes
+
+
+def _parse_prefs_request(request: str, prefs: Dict[str, object]) -> Dict[str, object]:
+    lower = request.lower()
+    updated = dict(prefs)
+    if "enable auto apply" in lower or "enable auto-apply" in lower:
+        updated["auto_apply_enabled"] = True
+    if "disable auto apply" in lower or "disable auto-apply" in lower:
+        updated["auto_apply_enabled"] = False
+    match = re.search(r"auto apply threshold to\s*([0-9.]+)", lower)
+    if match:
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            value = prefs.get("auto_apply_threshold", 0.92)
+        updated["auto_apply_threshold"] = max(0.0, min(value, 1.0))
+    return updated
+
+
+def _build_correction_updates(
+    candidate: Dict[str, Any], old_text: str | None, new_text: str | None
+) -> Dict[str, Any]:
+    title = str(candidate.get("title") or "")
+    if new_text:
+        if old_text:
+            new_title = _replace_case_insensitive(title, old_text, new_text)
+        else:
+            new_title = new_text
+        return {"title": new_title, "properties": {}}
+    return {"properties": {}}
 
 
 def _extract_triage_title(triage_payload: Dict[str, Any]) -> str | None:
@@ -321,6 +521,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--scaffold", action="store_true")
+    parser.add_argument("--auto-apply", action="store_true")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     request_text = " ".join(args.request).strip()
@@ -329,6 +531,8 @@ def main() -> int:
         dry_run = False
     if args.dry_run:
         dry_run = True
+
+    prefs = load_prefs()
 
     route, route_meta = _route(request_text, args.scaffold)
     errors: List[str] = []
@@ -358,6 +562,178 @@ def main() -> int:
             result["triage"] = _run_triage(dry_run=dry_run)
             if dry_run:
                 next_actions.append("Re-run with --execute to write spec/plan files.")
+        elif route == "prefs":
+            updated_prefs = _parse_prefs_request(request_text, prefs)
+            save_prefs(updated_prefs)
+            result["prefs"] = updated_prefs
+            next_actions.append("Prefs saved. Re-run with your request.")
+        elif route == "apply_last":
+            if dry_run:
+                next_actions.append("Re-run with --execute to apply the last preview.")
+            else:
+                preview = _load_last_preview()
+                if not preview:
+                    raise RuntimeError("No last preview found.")
+                if preview.get("type") != "notion_correction":
+                    raise RuntimeError("Last preview is not a Notion correction.")
+                timestamp = str(preview.get("timestamp") or "")
+                if not _preview_is_fresh(timestamp) and not args.force:
+                    raise RuntimeError("Last preview is older than 24h. Re-run with --force.")
+                payload = {
+                    "page_id": preview.get("page_id"),
+                    "updates": preview.get("updates"),
+                    "dry_run": False,
+                }
+                result["commands"].append(
+                    "./vm/mcp_curl.sh notion_update_page " + json.dumps(payload)
+                )
+                result["notion_update"] = _run_mcp_tool("notion_update_page", payload)
+        elif route == "correct_tool_request":
+            old_text, new_text = _parse_correction_request(request_text)
+            if not new_text:
+                raise RuntimeError("No correction target found. Use: change 'X' to 'Y'.")
+
+            page_id = _extract_page_id(request_text)
+            items: List[Dict[str, Any]] = []
+            if page_id:
+                result["commands"].append(
+                    "./vm/mcp_curl.sh notion_get_page " + json.dumps({"page_id": page_id})
+                )
+                page = _run_mcp_tool("notion_get_page", {"page_id": page_id})
+                summary = page.get("result", {}).get("page", {})
+                items = [
+                    {
+                        "id": summary.get("id"),
+                        "title": summary.get("title"),
+                        "url": summary.get("url"),
+                        "created_time": "",
+                    }
+                ]
+            else:
+                query = old_text or _extract_search_query(request_text)
+                search = _run_mcp_tool("tool_requests_search", {"query": query, "limit": 10})
+                result["commands"].append(
+                    "./vm/mcp_curl.sh tool_requests_search " + json.dumps({"query": query, "limit": 10})
+                )
+                items = search.get("result", {}).get("items", [])
+                if not items and new_text:
+                    fallback_query = new_text
+                    search = _run_mcp_tool(
+                        "tool_requests_search", {"query": fallback_query, "limit": 10}
+                    )
+                    result["commands"].append(
+                        "./vm/mcp_curl.sh tool_requests_search "
+                        + json.dumps({"query": fallback_query, "limit": 10})
+                    )
+                    items = search.get("result", {}).get("items", [])
+                if not items and new_text:
+                    simplified = _simplify_query(new_text)
+                    if simplified and simplified != new_text:
+                        search = _run_mcp_tool(
+                            "tool_requests_search", {"query": simplified, "limit": 10}
+                        )
+                        result["commands"].append(
+                            "./vm/mcp_curl.sh tool_requests_search "
+                            + json.dumps({"query": simplified, "limit": 10})
+                        )
+                        items = search.get("result", {}).get("items", [])
+            if not items:
+                result["candidates"] = []
+                next_actions.append("No matches. Try quoting the exact title.")
+            elif len(items) > 1 and not page_id:
+                candidates = []
+                for item in items:
+                    confidence, breakdown = _compute_confidence(
+                        request_text, item, items, old_text
+                    )
+                    candidates.append(
+                        {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "url": item.get("url"),
+                            "confidence": confidence,
+                        }
+                    )
+                result["candidates"] = candidates
+                next_actions.append("Multiple matches found. Re-run with a page URL or id.")
+            else:
+                candidate = items[0]
+                confidence, breakdown = _compute_confidence(
+                    request_text, candidate, items, old_text
+                )
+                updates = _build_correction_updates(candidate, old_text, new_text)
+                correction_payload = {
+                    "page_id": candidate.get("id"),
+                    "updates": updates,
+                }
+                result["correction"] = {
+                    "target": {
+                        "id": candidate.get("id"),
+                        "title": candidate.get("title"),
+                        "url": candidate.get("url"),
+                    },
+                    "confidence": confidence,
+                    "confidence_breakdown": breakdown,
+                }
+                result["confidence"] = confidence
+                result["confidence_breakdown"] = breakdown
+
+                auto_apply_enabled = bool(prefs.get("auto_apply_enabled"))
+                threshold = float(prefs.get("auto_apply_threshold") or 0.92)
+                scope = prefs.get("auto_apply_scope") or []
+                allow_auto = (
+                    auto_apply_enabled
+                    and args.auto_apply
+                    and "notion_corrections" in scope
+                )
+
+                if dry_run:
+                    payload = dict(correction_payload, dry_run=True)
+                    result["commands"].append(
+                        "./vm/mcp_curl.sh notion_update_page " + json.dumps(payload)
+                    )
+                    result["notion_update"] = _run_mcp_tool("notion_update_page", payload)
+                    _save_last_preview(
+                        {
+                            "type": "notion_correction",
+                            "page_id": candidate.get("id"),
+                            "updates": updates,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "confidence": confidence,
+                        }
+                    )
+                    if confidence >= threshold:
+                        next_actions.append(
+                            f"High confidence ({confidence:.2f}). To apply: "
+                            "python scripts/agent.py \"apply that\" --execute"
+                        )
+                        next_actions.append(
+                            "Or rerun with --execute --auto-apply."
+                        )
+                    else:
+                        next_actions.append(
+                            f"Confidence ({confidence:.2f}) below threshold. "
+                            "Re-run with --execute --force to apply."
+                        )
+                else:
+                    payload = dict(correction_payload, dry_run=False)
+                    if allow_auto and confidence < threshold and not args.force:
+                        preview_payload = dict(correction_payload, dry_run=True)
+                        result["commands"].append(
+                            "./vm/mcp_curl.sh notion_update_page " + json.dumps(preview_payload)
+                        )
+                        result["notion_update"] = _run_mcp_tool(
+                            "notion_update_page", preview_payload
+                        )
+                        next_actions.append(
+                            f"Confidence ({confidence:.2f}) below threshold. "
+                            "Re-run with --execute --force to apply."
+                        )
+                    else:
+                        result["commands"].append(
+                            "./vm/mcp_curl.sh notion_update_page " + json.dumps(payload)
+                        )
+                        result["notion_update"] = _run_mcp_tool("notion_update_page", payload)
         elif route == "edit_notion":
             page_id = _extract_page_id(request_text)
             updates, intent_notes = _parse_edit_intent(request_text)

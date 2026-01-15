@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# DEPRECATED: moved to legacy/vm during cleanup. Use canonical vm/ scripts instead.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -85,10 +85,8 @@ PY
 }
 
 raw_mode=0
-if [[ "${1:-}" == "--raw" ]]; then
-  raw_mode=1
-  shift
-fi
+list_mode=0
+use_local=0
 
 if [[ "${1:-}" == "--self-test" ]]; then
   resp="$(DEBUG=1 "$0" hello '{"name":"Jordane"}')"
@@ -105,20 +103,55 @@ if [[ "${1:-}" == "--self-test" ]]; then
   exit 0
 fi
 
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --raw)
+      raw_mode=1
+      shift
+      ;;
+    --list)
+      list_mode=1
+      shift
+      ;;
+    --local)
+      use_local=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ "$use_local" -eq 1 && -n "${VM_MCP_LOCAL_URL:-}" ]]; then
+  MCP_URL="$VM_MCP_LOCAL_URL"
+fi
+
 name="${1:-}"
 
-if [[ -z "$name" ]]; then
+if [[ "$list_mode" -eq 0 && -z "$name" ]]; then
   echo "Usage: $0 <tool_name> [json_args]" >&2
+  echo "Usage: $0 --list [--local]" >&2
   echo "Example: $0 health_check" >&2
   echo "Example: $0 tool_requests_latest '{\"limit\":5}'" >&2
   echo "Example: $0 hello '{\"name\":\"Jordane\"}'" >&2
   exit 1
 fi
 
-if [[ $# -ge 2 ]]; then
-  payload="$(build_payload "$1" "$2")"
+if [[ "$list_mode" -eq 1 ]]; then
+  payload="$(python3 - <<'PY'
+import json
+
+payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+print(json.dumps(payload))
+PY
+)"
 else
-  payload="$(build_payload "$1")"
+  if [[ $# -ge 2 ]]; then
+    payload="$(build_payload "$1" "$2")"
+  else
+    payload="$(build_payload "$1")"
+  fi
 fi
 
 response="$(curl -sS \

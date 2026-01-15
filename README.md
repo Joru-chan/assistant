@@ -33,6 +33,14 @@ Use the universal router to translate natural language into actions:
   - `./vm/mcp_curl.sh notion_search '{"query":"Receipt photo","limit":5}'`
   - `./vm/mcp_curl.sh notion_update_page '{"page_id":"<id>","updates":{"title":"New title"},"dry_run":true}'`
 
+## Toolbox UI (read-only)
+Browse and search the registered VM MCP tools locally.
+- Build the catalog:
+  - `python scripts/tool_catalog.py build`
+- Start the UI (runs at `http://127.0.0.1:8765`):
+  - `python scripts/toolbox_ui.py`
+- Use the “Refresh catalog” button after adding new tools.
+
 ## Notion Structure (Personal)
 The personal system is centered around the Life Atlas database and an “Assistant HQ” page that contains child databases:
 - Personal Tasks

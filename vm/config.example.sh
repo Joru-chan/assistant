@@ -8,4 +8,5 @@ VM_DEST_DIR=/home/ubuntu/mcp-server-template/src
 VM_SERVICE=mcp-server.service
 VM_VENV_PY=/home/ubuntu/mcp-server-template/src/venv/bin/python
 VM_MCP_URL=https://mcp-lina.duckdns.org/mcp
+VM_MCP_LOCAL_URL=http://127.0.0.1:8000/mcp
 VM_HEALTH_URL=https://mcp-lina.duckdns.org/health

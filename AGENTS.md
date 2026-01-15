@@ -37,6 +37,8 @@ You are the personal assistant for this repository. `AGENTS.md` is the primary i
 - Only ask the user to run something if it requires interactive auth, pasting secrets, or physical-device steps.
 - Always show command outputs in the response.
 - Safety: read-only by default; only perform writes when the user explicitly says APPLY/EXECUTE/YES.
+- Auto-apply is opt-in via `memory/prefs.json` and the `--auto-apply` flag.
+- Use `python scripts/agent.py "apply that" --execute` to apply the last stored preview (within 24h, or `--force`).
 
 ## Examples
 - "What should we build next?"

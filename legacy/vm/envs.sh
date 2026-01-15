@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# DEPRECATED: moved to legacy/vm during cleanup. Use canonical vm/ scripts instead.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,19 +18,5 @@ if [[ -z "${VM_HOST:-}" || -z "${VM_USER:-}" || -z "${VM_SSH_KEY:-}" || -z "${VM
   exit 1
 fi
 
-lines=""
-follow="true"
-if [[ "${1:-}" == "--lines" && -n "${2:-}" ]]; then
-  lines="$2"
-  follow="false"
-elif [[ "${1:-}" =~ ^[0-9]+$ ]]; then
-  lines="$1"
-  follow="false"
-fi
-
-if [[ "$follow" == "true" ]]; then
-  ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" "journalctl -u $VM_SERVICE -f"
-else
-  ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" \
-    "journalctl -u $VM_SERVICE -n $lines --no-pager"
-fi
+ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" \
+  "systemctl show $VM_SERVICE | grep '^Environment=' || echo '(none)'"

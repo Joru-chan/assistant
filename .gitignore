@@ -56,6 +56,8 @@ logs/
 # Local queues
 memory/
 memory/*.jsonl
+memory/prefs.json
+memory/last_preview.json
 
 # Database
 *.db

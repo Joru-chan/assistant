@@ -13,19 +13,34 @@ fi
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-if [[ -z "${VM_HOST:-}" || -z "${VM_USER:-}" || -z "${VM_SSH_KEY:-}" || -z "${VM_DEST_DIR:-}" || -z "${VM_SERVICE:-}" || -z "${VM_LOCAL_SRC:-}" ]]; then
-  echo "Missing required VM_* variables in vm/config.sh." >&2
-  exit 1
+restart_only=0
+if [[ "${1:-}" == "--restart-only" || "${1:-}" == "--restart" ]]; then
+  restart_only=1
+  shift
 fi
 
-LOCAL_SRC="$VM_LOCAL_SRC"
-if [[ "$LOCAL_SRC" != /* ]]; then
-  LOCAL_SRC="$ROOT_DIR/$LOCAL_SRC"
+if [[ "$restart_only" -eq 1 ]]; then
+  if [[ -z "${VM_HOST:-}" || -z "${VM_USER:-}" || -z "${VM_SSH_KEY:-}" || -z "${VM_SERVICE:-}" ]]; then
+    echo "Missing VM_HOST, VM_USER, VM_SSH_KEY, or VM_SERVICE in vm/config.sh." >&2
+    exit 1
+  fi
+else
+  if [[ -z "${VM_HOST:-}" || -z "${VM_USER:-}" || -z "${VM_SSH_KEY:-}" || -z "${VM_DEST_DIR:-}" || -z "${VM_SERVICE:-}" || -z "${VM_LOCAL_SRC:-}" ]]; then
+    echo "Missing required VM_* variables in vm/config.sh." >&2
+    exit 1
+  fi
 fi
 
-if [[ ! -d "$LOCAL_SRC" ]]; then
-  echo "VM_LOCAL_SRC does not exist: $LOCAL_SRC" >&2
-  exit 1
+if [[ "$restart_only" -eq 0 ]]; then
+  LOCAL_SRC="$VM_LOCAL_SRC"
+  if [[ "$LOCAL_SRC" != /* ]]; then
+    LOCAL_SRC="$ROOT_DIR/$LOCAL_SRC"
+  fi
+
+  if [[ ! -d "$LOCAL_SRC" ]]; then
+    echo "VM_LOCAL_SRC does not exist: $LOCAL_SRC" >&2
+    exit 1
+  fi
 fi
 
 RSYNC_EXCLUDES=(
@@ -39,17 +54,21 @@ RSYNC_EXCLUDES=(
   "--exclude=.git/"
 )
 
-echo "Deploying from $LOCAL_SRC to $VM_USER@$VM_HOST:$VM_DEST_DIR"
+if [[ "$restart_only" -eq 0 ]]; then
+  echo "Deploying from $LOCAL_SRC to $VM_USER@$VM_HOST:$VM_DEST_DIR"
 
-rsync -az "${RSYNC_EXCLUDES[@]}" \
-  -e "ssh -i $VM_SSH_KEY" \
-  "$LOCAL_SRC/" "$VM_USER@$VM_HOST:$VM_DEST_DIR/"
+  rsync -az "${RSYNC_EXCLUDES[@]}" \
+    -e "ssh -i $VM_SSH_KEY" \
+    "$LOCAL_SRC/" "$VM_USER@$VM_HOST:$VM_DEST_DIR/"
 
-VENV_PY="${VM_VENV_PY:-/home/ubuntu/mcp-server-template/src/venv/bin/python}"
-REMOTE_REQUIREMENTS="$VM_DEST_DIR/requirements.txt"
-echo "Syncing dependencies (if requirements.txt exists)"
-ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" \
-  "if [ -f '$REMOTE_REQUIREMENTS' ]; then '$VENV_PY' -m pip install -r '$REMOTE_REQUIREMENTS'; else echo 'No requirements.txt found.'; fi"
+  VENV_PY="${VM_VENV_PY:-/home/ubuntu/mcp-server-template/src/venv/bin/python}"
+  REMOTE_REQUIREMENTS="$VM_DEST_DIR/requirements.txt"
+  echo "Syncing dependencies (if requirements.txt exists)"
+  ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" \
+    "if [ -f '$REMOTE_REQUIREMENTS' ]; then '$VENV_PY' -m pip install -r '$REMOTE_REQUIREMENTS'; else echo 'No requirements.txt found.'; fi"
+else
+  echo "Restart-only mode: skipping rsync and dependency sync."
+fi
 
 echo "Restarting service: $VM_SERVICE"
 ssh -i "$VM_SSH_KEY" "$VM_USER@$VM_HOST" \

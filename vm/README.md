@@ -13,11 +13,19 @@ restart the MCP server service.
 ## Scripts
 - `vm/ssh.sh`    : open an SSH session to the VM
 - `vm/status.sh` : show systemd status + last 50 logs
-- `vm/logs.sh`   : tail service logs (journalctl -f)
+- `vm/logs.sh`   : tail service logs (journalctl -f) or `--lines N`
 - `vm/deploy.sh` : rsync code to VM + restart service + health check
 - `vm/pull_server_from_vm.sh` : pull the live server code from the VM
-- `vm/diagnose_caddy_mcp.sh` : diagnose 502s and proxy config on the VM
-- `vm/fix_caddy_mcp.sh` : patch Caddy to proxy /mcp correctly (with backup)
+- `vm/mcp_curl.sh` : call MCP tools with correct headers
+- `vm/health_check.sh` : canonical health check (HTTP + MCP)
+
+## One true workflow
+1) Deploy: `./vm/deploy.sh`
+2) Check health: `./vm/health_check.sh`
+3) Call a tool: `./vm/mcp_curl.sh <tool> '{\"...\": \"...\"}'`
+4) Pull server code (if needed): `./vm/pull_server_from_vm.sh`
+5) Run Toolbox UI: `python3 scripts/toolbox_ui.py`
+6) Restart only: `./vm/deploy.sh --restart-only`
 
 ## Deploy behavior
 - Uses `rsync` to copy `VM_LOCAL_SRC/` to `VM_DEST_DIR/`.
@@ -43,6 +51,7 @@ The current server expects these env vars (set on the VM, not in git):
 - `SERENDIPITY_EVENT_WEBHOOK_URL`
 - `PORT` (default `8000`)
 - `MCP_SYSTEM_OVERVIEW.md` at `/home/ubuntu/MCP_SYSTEM_OVERVIEW.md`
+- `ADMIN_TOKEN` (required for admin_* MCP tools)
 
 ## Health check
 - Primary: `GET /health` (returns 200 with `{\"ok\": true}`).
@@ -65,22 +74,16 @@ Use the wrapper to hit MCP tools with the correct headers:
 ```bash
 ./vm/mcp_curl.sh health_check
 ./vm/mcp_curl.sh tool_requests_latest '{"limit":5}'
+./vm/mcp_curl.sh --list
+./vm/mcp_curl.sh --list --local
 ```
 
-## Set service env vars
-Use the helper script to set Notion env vars on the VM via a systemd drop-in:
-```bash
-./vm/set_service_env.sh
-```
-Security note: the token is only written on the VM and never stored in git.
+## Add a new tool module
+1) Add a module under `vm_server/tools/`.
+2) Register it in `vm_server/tools/registry.py`.
+3) Deploy: `./vm/deploy.sh`.
+4) Validate with `./vm/mcp_curl.sh --list`.
 
-## 502 on /mcp
-This usually means Caddy is not proxying `/mcp` to the FastMCP server port
-or the service is down. Run:
-```bash
-./vm/diagnose_caddy_mcp.sh
-```
-If needed, apply the minimal fix (creates a backup first):
-```bash
-./vm/fix_caddy_mcp.sh
-```
+## Legacy scripts
+Deprecated admin scripts live in `legacy/vm/`. They are kept for reference,
+but the canonical workflow uses the scripts listed above.

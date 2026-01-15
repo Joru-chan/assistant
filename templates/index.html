@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Toolbox</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-title">Toolbox</div>
+        <div class="brand-subtitle">Local MCP control center</div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-section="tools">Tools</button>
+        <button class="nav-item" data-section="admin">Admin</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="refresh" class="secondary">Refresh catalog</button>
+        <div id="meta" class="meta">Catalog not loaded.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">Toolbox</div>
+        <div class="topbar-status">
+          <span id="status-admin-token" class="pill">Admin token: —</span>
+          <span id="status-advanced" class="pill">Advanced: off</span>
+        </div>
+        <button id="open-settings" class="icon-button" title="Settings">⚙</button>
+      </header>
+
+      <section id="section-tools" class="section active">
+        <div class="section-header">
+          <h2>Tools</h2>
+          <p>Browse MCP tools registered on the VM server.</p>
+        </div>
+        <div class="tools-layout">
+          <div class="card">
+            <label class="field-label" for="search">Search tools</label>
+            <input id="search" type="text" placeholder="Search by name or tag..." />
+            <div id="tool-list" class="tool-list"></div>
+          </div>
+          <div class="card detail" id="detail">
+            <h3>Select a tool</h3>
+            <p class="muted">Pick a tool from the list to see details.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="section-admin" class="section">
+        <div class="section-header">
+          <h2>Admin</h2>
+          <p>Core VM operations with safe, confirm-first actions.</p>
+        </div>
+        <div class="segmented" id="admin-tabs">
+          <button class="segmented-item active" data-admin-tab="overview">Overview</button>
+          <button class="segmented-item" data-admin-tab="vm">VM Operations</button>
+          <button class="segmented-item" data-admin-tab="mcp">MCP Operations</button>
+        </div>
+
+        <div class="admin-panel" data-admin-panel="overview">
+          <div class="status-grid">
+            <div class="status-tile">
+              <div class="status-label">VM status</div>
+              <div class="status-value" id="overview-vm-status">Not checked yet.</div>
+            </div>
+            <div class="status-tile">
+              <div class="status-label">MCP health</div>
+              <div class="status-value" id="overview-mcp-health">Not checked yet.</div>
+            </div>
+            <div class="status-tile">
+              <div class="status-label">Last deploy</div>
+              <div class="status-value" id="overview-last-deploy">Never.</div>
+            </div>
+          </div>
+          <div class="card action">
+            <h3>VM operations</h3>
+            <p class="muted">Deploy, restart, pull, and logs live in VM Operations.</p>
+            <button class="primary" id="action-open-vm">Open VM operations</button>
+          </div>
+        </div>
+
+        <div class="admin-panel hidden" data-admin-panel="vm">
+          <div class="card info">
+            <h3>VM status</h3>
+            <p class="muted" id="vm-status-text">Check the current service status and recent logs.</p>
+            <button class="secondary" id="action-vm-status">Check status</button>
+          </div>
+          <div class="card action">
+            <h3>VM logs</h3>
+            <p class="muted">Fetch recent log lines without tailing.</p>
+            <details>
+              <summary>Choose line count</summary>
+              <div class="button-row">
+                <button class="secondary" id="action-logs-50">50 lines</button>
+                <button class="secondary" id="action-logs-200">200 lines</button>
+                <button class="secondary" id="action-logs-1000">1000 lines</button>
+              </div>
+            </details>
+            <button class="secondary" id="action-vm-logs">Fetch logs</button>
+          </div>
+          <div class="danger-zone">
+            <div class="danger-title">Danger zone</div>
+            <div class="card danger">
+              <h3>Deploy VM</h3>
+              <p class="muted">Deploy local server code and restart the service.</p>
+              <div class="card-actions">
+                <label class="checkbox">
+                  <input type="checkbox" id="confirm-deploy-ops" /> Confirm deploy
+                </label>
+                <button class="danger" id="action-vm-deploy-ops">Deploy and restart</button>
+              </div>
+            </div>
+            <div class="card danger">
+              <h3>Restart service</h3>
+              <p class="muted">Restart the systemd service on the VM.</p>
+              <div class="card-actions">
+                <label class="checkbox">
+                  <input type="checkbox" id="confirm-vm-restart" /> Confirm restart
+                </label>
+                <button class="danger" id="action-vm-restart">Restart service</button>
+              </div>
+            </div>
+            <div class="card danger">
+              <h3>Pull VM server code</h3>
+              <p class="muted">Sync live VM server code into local vm_server/.</p>
+              <div class="card-actions">
+                <label class="checkbox">
+                  <input type="checkbox" id="confirm-pull" /> Confirm pull
+                </label>
+                <button class="danger" id="action-vm-pull">Pull from VM</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-panel hidden" data-admin-panel="mcp">
+          <div class="card info">
+            <h3>MCP health</h3>
+            <p class="muted" id="mcp-health-text">Check HTTP + MCP health probes.</p>
+            <button class="secondary" id="action-health-check">Check health</button>
+          </div>
+          <div class="card action">
+            <h3>Hello test</h3>
+            <p class="muted">Run a quick hello call against the MCP server.</p>
+            <button class="secondary" id="action-mcp-hello">Run hello test</button>
+          </div>
+          <div class="card info">
+            <h3>Tools list</h3>
+            <p class="muted">Fetch the current tool registry (read-only).</p>
+            <div class="card-actions">
+              <select id="select-tools-source">
+                <option value="https">HTTPS</option>
+                <option value="local">Local</option>
+              </select>
+              <button class="secondary" id="action-tools-list">Fetch tools list</button>
+            </div>
+          </div>
+          <div class="card action">
+            <h3>Advanced MCP call</h3>
+            <p class="muted">Hidden by default. Use for custom JSON calls.</p>
+            <label class="checkbox">
+              <input type="checkbox" id="toggle-mcp-advanced" /> Show advanced MCP call
+            </label>
+            <div id="advanced-mcp-call" class="hidden">
+              <div class="form-grid">
+                <div>
+                  <label class="field-label" for="input-mcp-tool">Tool name</label>
+                  <input id="input-mcp-tool" type="text" placeholder="tool_name" />
+                </div>
+                <div>
+                  <label class="field-label" for="input-mcp-args">JSON args</label>
+                  <textarea id="input-mcp-args" rows="4">{"name":"Jordane"}</textarea>
+                </div>
+              </div>
+              <button class="secondary" id="action-mcp-call">Run MCP call</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="output-drawer" class="output-drawer collapsed">
+    <div class="output-header">
+      <div>
+        <strong>Output</strong>
+        <span class="muted" id="output-status">Idle</span>
+      </div>
+      <div class="output-actions">
+        <label class="checkbox">
+          <input type="checkbox" id="output-autoscroll" checked /> Auto-scroll
+        </label>
+        <button id="output-copy" class="secondary">Copy</button>
+        <button id="output-clear" class="secondary">Clear</button>
+        <button id="output-toggle" class="secondary">Collapse</button>
+      </div>
+    </div>
+    <pre id="output-content">Output will appear here.</pre>
+    <div id="output-tail" class="output-tail">Last 30 lines will appear here.</div>
+  </div>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Settings</h3>
+        <button id="close-settings" class="secondary">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div>
+            <label class="field-label" for="input-admin-token">Local admin token</label>
+            <input id="input-admin-token" type="password" placeholder="auto-loaded" />
+          </div>
+        </div>
+        <label class="checkbox">
+          <input type="checkbox" id="toggle-advanced" /> Enable advanced MCP calls
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
