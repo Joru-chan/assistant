@@ -46,6 +46,14 @@ def _extract_select(properties: Dict[str, Any], name: str) -> str:
     return str(select.get("name") or "").strip()
 
 
+def _extract_multi_select(properties: Dict[str, Any], name: str) -> List[str]:
+    prop = properties.get(name)
+    if not prop or prop.get("type") != "multi_select":
+        return []
+    items = prop.get("multi_select", [])
+    return [item.get("name", "").strip() for item in items if item.get("name")]
+
+
 def _build_status_filter(statuses: List[str]) -> Dict[str, Any] | None:
     cleaned = [status.strip() for status in statuses if status.strip()]
     if not cleaned:
@@ -71,6 +79,7 @@ def _build_search_filter(query: str) -> Dict[str, Any]:
         "or": [
             {"property": "Title", "title": {"contains": query}},
             {"property": "Description", "rich_text": {"contains": query}},
+            {"property": "Desired outcome", "rich_text": {"contains": query}},
         ]
     }
 
@@ -83,10 +92,14 @@ def _extract_items(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             {
                 "id": page.get("id"),
                 "title": _extract_title(properties),
+                "description": _extract_rich_text(properties, "Description"),
                 "created_time": page.get("created_time"),
                 "status": _extract_select(properties, "Status"),
                 "source": _extract_select(properties, "Source"),
                 "desired_outcome": _extract_rich_text(properties, "Desired outcome"),
+                "domain": _extract_multi_select(properties, "Domain"),
+                "impact": _extract_select(properties, "Impact"),
+                "frequency": _extract_select(properties, "Frequency"),
                 "url": page.get("url"),
             }
         )

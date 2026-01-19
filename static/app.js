@@ -1,8 +1,11 @@
 let catalog = null;
-let selected = null;
 
-const toolListEl = document.getElementById('tool-list');
-const detailEl = document.getElementById('detail');
+const toolGrid = document.getElementById('tool-grid');
+const pinnedSection = document.getElementById('pinned-section');
+const pinnedGrid = document.getElementById('pinned-grid');
+const pinnedCount = document.getElementById('pinned-count');
+const tagFilter = document.getElementById('tag-filter');
+const filterPinned = document.getElementById('filter-pinned');
 const metaEl = document.getElementById('meta');
 const searchInput = document.getElementById('search');
 const outputDrawer = document.getElementById('output-drawer');
@@ -42,6 +45,10 @@ const SAFE_TOOLS = new Set([
   'notion_search',
   'notion_get_page',
 ]);
+const DANGEROUS_PATTERN = /(deploy|restart|delete|remove|update|apply|set_env|write|create_)/i;
+
+const PINNED_KEY = 'pinnedTools';
+const jobMeta = new Map();
 
 const historyState = {
   status: { label: 'VM Status', lastRun: 'never', exitCode: '-' },
@@ -85,6 +92,85 @@ function formatJobOutput(job) {
   return output || '(no output yet)';
 }
 
+function getPinnedTools() {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function setPinnedTools(items) {
+  localStorage.setItem(PINNED_KEY, JSON.stringify(items));
+}
+
+function togglePinned(name) {
+  const current = new Set(getPinnedTools());
+  if (current.has(name)) {
+    current.delete(name);
+  } else {
+    current.add(name);
+  }
+  setPinnedTools(Array.from(current));
+}
+
+function requiresConfirm(name) {
+  return name.startsWith('admin_') || DANGEROUS_PATTERN.test(name);
+}
+
+function isToolAllowed(name) {
+  if (advancedToggle.checked) {
+    return true;
+  }
+  return SAFE_TOOLS.has(name);
+}
+
+function firstNonEmptyLine(text) {
+  return (text || '').split('\n').map(line => line.trim()).find(Boolean) || '';
+}
+
+function extractSummary(output) {
+  if (!output) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(output);
+    const result = parsed.result || parsed;
+    if (result?.structuredContent?.summary) {
+      return result.structuredContent.summary;
+    }
+    const text = result?.content?.[0]?.text;
+    if (text) {
+      try {
+        const nested = JSON.parse(text);
+        if (nested?.summary) {
+          return nested.summary;
+        }
+      } catch (_) {
+        return firstNonEmptyLine(text);
+      }
+    }
+  } catch (_) {
+    return firstNonEmptyLine(output);
+  }
+  return '';
+}
+
+function formatToolHeader(job, meta) {
+  const status = job.exit_code === 0 ? 'ok' : 'error';
+  const when = new Date(job.updated_at || job.started_at || Date.now()).toLocaleString();
+  const summary = extractSummary(job.stdout || '') || firstNonEmptyLine(job.stderr || '');
+  const summaryLine = summary ? `Summary: ${summary}` : 'Summary: (none)';
+  return [
+    `Tool: ${meta.toolName} • ${when}`,
+    `Status: ${status}`,
+    summaryLine,
+    '',
+  ].join('\n');
+}
+
 function updateOverview() {
   overviewLastDeploy.textContent = historyState.deploy.lastRun === 'never' ? 'Never.' : historyState.deploy.lastRun;
 }
@@ -92,6 +178,7 @@ function updateOverview() {
 function setStatusIndicators() {
   statusAdminToken.textContent = adminTokenInput.value.trim() ? 'Admin token: ✓' : 'Admin token: missing';
   statusAdvanced.textContent = advancedToggle.checked ? 'Advanced: on' : 'Advanced: off';
+  document.body.classList.toggle('advanced-on', advancedToggle.checked);
 }
 
 function getAdminToken() {
@@ -119,9 +206,15 @@ async function pollJob(jobId, actionKey) {
     const headers = token ? { 'X-Admin-Token': token } : {};
     const response = await fetch(`/api/jobs/${jobId}`, { headers });
     const data = await response.json();
-    setOutput(formatJobOutput(data), data.done ? 'Done' : 'Running');
+    const meta = jobMeta.get(jobId);
+    let output = formatJobOutput(data);
+    if (meta && meta.type === 'tool' && data.done) {
+      output = `${formatToolHeader(data, meta)}${output}`;
+    }
+    setOutput(output, data.done ? 'Done' : 'Running');
     if (data.done) {
       clearInterval(timer);
+      jobMeta.delete(jobId);
       const state = historyState[actionKey];
       if (state) {
         state.lastRun = data.updated_at || data.started_at || 'unknown';
@@ -144,7 +237,7 @@ async function pollJob(jobId, actionKey) {
   await poll();
 }
 
-function runJob(cmd, actionKey, confirm, advanced) {
+function runJob(cmd, actionKey, confirm, advanced, meta) {
   if (!getAdminToken()) {
     setOutput('Admin token required.', 'Error');
     return;
@@ -155,6 +248,9 @@ function runJob(cmd, actionKey, confirm, advanced) {
     if (data.error) {
       setOutput(JSON.stringify(data, null, 2), 'Error');
       return;
+    }
+    if (meta) {
+      jobMeta.set(data.job_id, meta);
     }
     pollJob(data.job_id, actionKey);
   });
@@ -170,66 +266,376 @@ async function loadCatalog() {
     if (catalog.error) {
       throw new Error(catalog.error);
     }
-    selected = null;
+    updateTagOptions();
     renderTools();
     metaEl.textContent = `Last built ${catalog.generated_at} — ${catalog.tool_count} tools`;
   } catch (error) {
     metaEl.textContent = `Failed to load catalog: ${error}`;
-    toolListEl.innerHTML = '<div class="muted">Catalog unavailable. Use Refresh to retry.</div>';
+    toolGrid.innerHTML = '<div class="muted">Catalog unavailable. Use Refresh to retry.</div>';
   }
 }
 
 function buildSnippet(tool) {
   const argsObj = {};
   (tool.args || []).forEach(arg => {
-    argsObj[arg.name] = arg.default === null ? '' : arg.default;
+    argsObj[arg.name] = '';
   });
   const jsonArgs = JSON.stringify(argsObj, null, 2);
   return `./vm/mcp_curl.sh ${tool.name} '${jsonArgs.replace(/\n/g, '\\n')}'`;
 }
 
-function renderTools() {
-  const query = searchInput.value.toLowerCase();
-  const tools = (catalog?.tools || []).filter(tool => {
-    const haystack = [tool.name, tool.doc, (tool.tags || []).join(' ')].join(' ').toLowerCase();
-    return haystack.includes(query);
-  });
-  toolListEl.innerHTML = '';
-  tools.forEach(tool => {
-    const item = document.createElement('div');
-    item.className = `tool-item${selected && selected.name === tool.name ? ' active' : ''}`;
-    item.innerHTML = `<div class="tool-name">${tool.name}</div><div class="muted">${tool.doc || 'No description.'}</div>`;
-    item.onclick = () => selectTool(tool);
-    toolListEl.appendChild(item);
-  });
-  if (!tools.length) {
-    toolListEl.innerHTML = '<div class="muted">No tools match your search.</div>';
+function normalizeDefault(value) {
+  if (!value || value === 'None') {
+    return '';
   }
-  if (!selected && tools.length) {
-    selectTool(tools[0]);
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function parseValue(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    return trimmed;
   }
 }
 
-function selectTool(tool) {
-  selected = tool;
-  renderTools();
-  detailEl.innerHTML = `
-    <h3>${tool.name}</h3>
-    <p class="muted">${tool.doc || 'No description.'}</p>
-    <div class="card-actions">
-      ${(tool.tags || []).map(tag => `<span class="pill">${tag}</span>`).join('') || '<span class="pill">untagged</span>'}
-    </div>
-    <div class="card-actions">
-      <span class="muted">Args: ${(tool.args || []).map(arg => arg.name).join(', ') || 'none'}</span>
-    </div>
-    <div class="card-actions">
-      <span class="muted">Module: ${tool.module}</span>
-    </div>
-    <div class="card-actions">
-      <span class="muted">Path: ${tool.path}</span>
-    </div>
-    <pre>${buildSnippet(tool)}</pre>
-  `;
+function updateTagOptions() {
+  if (!catalog) {
+    return;
+  }
+  const tags = new Set();
+  (catalog.tools || []).forEach(tool => {
+    (tool.tags || []).forEach(tag => tags.add(tag));
+  });
+  const sorted = Array.from(tags).sort();
+  tagFilter.innerHTML = '<option value="all">All tags</option>';
+  sorted.forEach(tag => {
+    const option = document.createElement('option');
+    option.value = tag;
+    option.textContent = tag;
+    tagFilter.appendChild(option);
+  });
+}
+
+function buildToolCard(tool, pinned) {
+  const card = document.createElement('div');
+  const confirmNeeded = requiresConfirm(tool.name);
+  card.className = `card tool-card ${confirmNeeded ? 'danger' : 'action'}`;
+
+  const header = document.createElement('div');
+  header.className = 'tool-header';
+
+  const titleWrap = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'tool-title';
+  title.textContent = tool.name;
+  const desc = document.createElement('div');
+  desc.className = 'tool-desc';
+  desc.textContent = tool.doc || 'No description yet.';
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(desc);
+
+  const pinButton = document.createElement('button');
+  pinButton.className = `btn btn-icon pin-button${pinned ? ' active' : ''}`;
+  pinButton.textContent = pinned ? '★' : '☆';
+  pinButton.title = pinned ? 'Unpin' : 'Pin';
+  pinButton.addEventListener('click', () => {
+    togglePinned(tool.name);
+    renderTools();
+  });
+
+  header.appendChild(titleWrap);
+  header.appendChild(pinButton);
+  card.appendChild(header);
+
+  if (tool.tags && tool.tags.length) {
+    const tagWrap = document.createElement('div');
+    tagWrap.className = 'tool-tags';
+    tool.tags.slice(0, 4).forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'tag';
+      chip.textContent = tag;
+      tagWrap.appendChild(chip);
+    });
+    card.appendChild(tagWrap);
+  }
+
+  if (confirmNeeded) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = 'Confirm required';
+    card.appendChild(badge);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'tool-actions';
+
+  const confirmLabel = document.createElement('label');
+  confirmLabel.className = `check-row confirm${confirmNeeded ? '' : ' hidden'}`;
+  const confirmInput = document.createElement('input');
+  confirmInput.type = 'checkbox';
+  confirmLabel.appendChild(confirmInput);
+  confirmLabel.appendChild(document.createTextNode('Confirm'));
+
+  const runBtn = document.createElement('button');
+  runBtn.className = 'btn btn-primary';
+  runBtn.textContent = 'Run';
+
+  const configBtn = document.createElement('button');
+  configBtn.className = 'btn btn-secondary';
+  configBtn.textContent = 'Configure';
+
+  actions.appendChild(confirmLabel);
+  actions.appendChild(runBtn);
+  actions.appendChild(configBtn);
+  card.appendChild(actions);
+
+  const configPanel = document.createElement('div');
+  configPanel.className = 'tool-config hidden';
+
+  const tabs = document.createElement('div');
+  tabs.className = 'config-tabs';
+  const simpleTab = document.createElement('button');
+  simpleTab.className = 'config-tab active';
+  simpleTab.textContent = 'Simple';
+  const jsonTab = document.createElement('button');
+  jsonTab.className = 'config-tab';
+  jsonTab.textContent = 'JSON';
+  tabs.appendChild(simpleTab);
+  tabs.appendChild(jsonTab);
+  configPanel.appendChild(tabs);
+
+  const simplePanel = document.createElement('div');
+  simplePanel.className = 'config-panel active';
+  const rows = document.createElement('div');
+  rows.className = 'kv-rows';
+  (tool.args || []).forEach(arg => {
+    const row = document.createElement('div');
+    row.className = 'kv-row';
+    const keyInput = document.createElement('input');
+    keyInput.className = 'kv-key';
+    keyInput.value = arg.name;
+    keyInput.placeholder = 'key';
+    const valueInput = document.createElement('input');
+    valueInput.className = 'kv-value';
+    valueInput.placeholder = 'value';
+    valueInput.value = normalizeDefault(arg.default || '');
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-icon kv-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove field';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(keyInput);
+    row.appendChild(valueInput);
+    row.appendChild(removeBtn);
+    rows.appendChild(row);
+  });
+  if (!(tool.args || []).length) {
+    const row = document.createElement('div');
+    row.className = 'kv-row';
+    const keyInput = document.createElement('input');
+    keyInput.className = 'kv-key';
+    keyInput.placeholder = 'key';
+    const valueInput = document.createElement('input');
+    valueInput.className = 'kv-value';
+    valueInput.placeholder = 'value';
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-icon kv-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove field';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(keyInput);
+    row.appendChild(valueInput);
+    row.appendChild(removeBtn);
+    rows.appendChild(row);
+  }
+  const addRowBtn = document.createElement('button');
+  addRowBtn.className = 'btn btn-ghost btn-sm';
+  addRowBtn.textContent = 'Add field';
+  addRowBtn.addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'kv-row';
+    const keyInput = document.createElement('input');
+    keyInput.className = 'kv-key';
+    keyInput.placeholder = 'key';
+    const valueInput = document.createElement('input');
+    valueInput.className = 'kv-value';
+    valueInput.placeholder = 'value';
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-icon kv-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove field';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(keyInput);
+    row.appendChild(valueInput);
+    row.appendChild(removeBtn);
+    rows.appendChild(row);
+  });
+  simplePanel.appendChild(rows);
+  simplePanel.appendChild(addRowBtn);
+
+  const jsonPanel = document.createElement('div');
+  jsonPanel.className = 'config-panel';
+  const jsonArea = document.createElement('textarea');
+  jsonArea.rows = 4;
+  jsonArea.value = '{}';
+  jsonPanel.appendChild(jsonArea);
+
+  configPanel.appendChild(simplePanel);
+  configPanel.appendChild(jsonPanel);
+
+  const runConfigBtn = document.createElement('button');
+  runConfigBtn.className = 'btn btn-primary btn-sm';
+  runConfigBtn.textContent = 'Run with args';
+  configPanel.appendChild(runConfigBtn);
+
+  const commandDetails = document.createElement('details');
+  commandDetails.className = 'advanced-only';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Show command';
+  const pre = document.createElement('pre');
+  pre.textContent = buildSnippet(tool);
+  commandDetails.appendChild(summary);
+  commandDetails.appendChild(pre);
+  configPanel.appendChild(commandDetails);
+
+  card.appendChild(configPanel);
+
+  function ensureConfirm() {
+    if (confirmNeeded && !confirmInput.checked) {
+      setOutput('Confirmation required to run this tool.', 'Error');
+      return false;
+    }
+    return true;
+  }
+
+  function ensureSafe() {
+    if (!isToolAllowed(tool.name)) {
+      setOutput('Enable Advanced mode to run this tool.', 'Error');
+      return false;
+    }
+    return true;
+  }
+
+  runBtn.addEventListener('click', () => {
+    if (!ensureSafe() || !ensureConfirm()) {
+      return;
+    }
+    runJob(
+      ['./vm/mcp_curl.sh', tool.name, '{}'],
+      'mcp',
+      confirmNeeded,
+      advancedToggle.checked,
+      { type: 'tool', toolName: tool.name }
+    );
+  });
+
+  configBtn.addEventListener('click', () => {
+    const open = !configPanel.classList.contains('hidden');
+    configPanel.classList.toggle('hidden', open);
+    configBtn.textContent = open ? 'Configure' : 'Hide';
+  });
+
+  simpleTab.addEventListener('click', () => {
+    simpleTab.classList.add('active');
+    jsonTab.classList.remove('active');
+    simplePanel.classList.add('active');
+    jsonPanel.classList.remove('active');
+  });
+  jsonTab.addEventListener('click', () => {
+    jsonTab.classList.add('active');
+    simpleTab.classList.remove('active');
+    jsonPanel.classList.add('active');
+    simplePanel.classList.remove('active');
+  });
+
+  runConfigBtn.addEventListener('click', () => {
+    if (!ensureSafe() || !ensureConfirm()) {
+      return;
+    }
+    let args = {};
+    if (jsonPanel.classList.contains('active')) {
+      try {
+        const parsed = JSON.parse(jsonArea.value || '{}');
+        if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+          setOutput('JSON args must be an object.', 'Error');
+          return;
+        }
+        args = parsed;
+      } catch (error) {
+        setOutput(`Invalid JSON args: ${error}`, 'Error');
+        return;
+      }
+    } else {
+      const rowsNodes = rows.querySelectorAll('.kv-row');
+      rowsNodes.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const key = inputs[0]?.value?.trim();
+        const value = inputs[1]?.value ?? '';
+        if (key) {
+          args[key] = parseValue(value);
+        }
+      });
+    }
+    runJob(
+      ['./vm/mcp_curl.sh', tool.name, JSON.stringify(args)],
+      'mcp',
+      confirmNeeded,
+      advancedToggle.checked,
+      { type: 'tool', toolName: tool.name }
+    );
+  });
+
+  return card;
+}
+
+function renderTools() {
+  const query = searchInput.value.toLowerCase();
+  const tag = tagFilter.value;
+  const pinned = new Set(getPinnedTools());
+  const showPinnedOnly = filterPinned.checked;
+  const tools = (catalog?.tools || [])
+    .filter(tool => !tool.name.endsWith('.register'))
+    .filter(tool => {
+      const haystack = [tool.name, tool.doc, (tool.tags || []).join(' ')].join(' ').toLowerCase();
+      const tagMatch = tag === 'all' || (tool.tags || []).includes(tag);
+      return haystack.includes(query) && tagMatch;
+    });
+
+  const pinnedTools = tools.filter(tool => pinned.has(tool.name));
+  pinnedCount.textContent = `${pinnedTools.length} pinned`;
+
+  pinnedGrid.innerHTML = '';
+  toolGrid.innerHTML = '';
+
+  if (!showPinnedOnly && pinnedTools.length) {
+    pinnedSection.classList.remove('hidden');
+    pinnedTools.forEach(tool => {
+      pinnedGrid.appendChild(buildToolCard(tool, true));
+    });
+  } else {
+    pinnedSection.classList.add('hidden');
+  }
+
+  const mainTools = showPinnedOnly ? pinnedTools : tools.filter(tool => !pinned.has(tool.name));
+  if (!mainTools.length) {
+    toolGrid.innerHTML = '<div class="muted">No tools match your search.</div>';
+    return;
+  }
+
+  mainTools.forEach(tool => {
+    toolGrid.appendChild(buildToolCard(tool, pinned.has(tool.name)));
+  });
 }
 
 function switchSection(sectionId) {
@@ -285,6 +691,8 @@ settingsModal.addEventListener('click', (event) => {
 });
 
 searchInput.addEventListener('input', renderTools);
+tagFilter.addEventListener('change', renderTools);
+filterPinned.addEventListener('change', renderTools);
 
 navItems.forEach(item => {
   item.addEventListener('click', () => switchSection(item.dataset.section));
@@ -348,9 +756,7 @@ advancedMcpCall.classList.add('hidden');
 const actionOpenVm = document.getElementById('action-open-vm');
 const actionVmStatus = document.getElementById('action-vm-status');
 const actionVmLogs = document.getElementById('action-vm-logs');
-const actionLogs50 = document.getElementById('action-logs-50');
-const actionLogs200 = document.getElementById('action-logs-200');
-const actionLogs1000 = document.getElementById('action-logs-1000');
+const logLineRadios = document.querySelectorAll('input[name="log-lines"]');
 const actionHealthCheck = document.getElementById('action-health-check');
 const actionVmDeployOps = document.getElementById('action-vm-deploy-ops');
 const actionVmPull = document.getElementById('action-vm-pull');
@@ -377,10 +783,11 @@ actionOpenVm.addEventListener('click', () => {
 });
 
 actionVmStatus.addEventListener('click', () => runJob(['./vm/status.sh'], 'status', false, false));
-actionVmLogs.addEventListener('click', () => runLogs(200));
-actionLogs50.addEventListener('click', () => runLogs(50));
-actionLogs200.addEventListener('click', () => runLogs(200));
-actionLogs1000.addEventListener('click', () => runLogs(1000));
+actionVmLogs.addEventListener('click', () => {
+  const selected = Array.from(logLineRadios).find(radio => radio.checked);
+  const value = selected ? parseInt(selected.value, 10) : 200;
+  runLogs(value);
+});
 actionHealthCheck.addEventListener('click', () => runJob(['./vm/health_check.sh'], 'health', false, false));
 
 actionVmDeployOps.addEventListener('click', () => {

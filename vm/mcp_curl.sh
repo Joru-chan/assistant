@@ -14,6 +14,10 @@ elif [[ -f "$CONFIG_EXAMPLE" ]]; then
 fi
 
 MCP_URL="${VM_MCP_URL:-https://mcp-lina.duckdns.org/mcp}"
+resolve_args=()
+if [[ -n "${VM_MCP_RESOLVE:-}" ]]; then
+  resolve_args=(--resolve "$VM_MCP_RESOLVE")
+fi
 
 build_payload() {
   python3 - "$@" <<'PY'
@@ -155,6 +159,7 @@ else
 fi
 
 response="$(curl -sS \
+  "${resolve_args[@]}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$payload" \

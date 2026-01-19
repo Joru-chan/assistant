@@ -12,6 +12,8 @@ DEFAULT_PREFS: Dict[str, object] = {
     "auto_apply_enabled": False,
     "auto_apply_threshold": 0.92,
     "auto_apply_scope": ["notion_corrections"],
+    "interactive_default": False,
+    "interactive_auto_confirm": False,
 }
 
 

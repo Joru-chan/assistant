@@ -46,6 +46,26 @@ curl -sS https://mcp-lina.duckdns.org/mcp \
 
 Safety: read-only tools (no writes).
 
+## Pantry inventory (Receipt photo)
+Required env vars on the VM service:
+- `NOTION_TOKEN`
+- `PANTRY_DB_ID`
+
+Optional property mapping env vars (defaults in code):
+- `PANTRY_PROP_NAME`
+- `PANTRY_PROP_QUANTITY`
+- `PANTRY_PROP_UNIT`
+- `PANTRY_PROP_CATEGORY`
+- `PANTRY_PROP_PURCHASE_DATE`
+- `PANTRY_PROP_STORE`
+
+Usage (dry-run preview):
+```bash
+curl -sS https://mcp-lina.duckdns.org/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"receipt_photo_pantry_inventory","arguments":{"receipt_text":"2x Milk $6.00\nApples $4.99","store":"Monoprix","purchase_date":"2026-01-16","dry_run":true}}}'
+```
+
 ## Health check
 - Primary: `GET /health` (returns `{"ok": true}`).
 - Fallback: call the `health_check` tool via `/mcp`.

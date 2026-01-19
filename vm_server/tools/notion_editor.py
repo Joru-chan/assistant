@@ -104,6 +104,13 @@ def _build_property_update(
             return None
         return {"select": {"name": value}}
     if prop_type == "multi_select":
+        if isinstance(value, dict) and "replace" in value:
+            replace_value = value.get("replace")
+            if not isinstance(replace_value, list):
+                errors.append(f"Multi-select property '{prop_name}' expects a list for replace.")
+                return None
+            cleaned = [str(item) for item in replace_value if item]
+            return {"multi_select": [{"name": name} for name in cleaned]}
         if isinstance(value, str):
             value = [value]
         if not isinstance(value, list):

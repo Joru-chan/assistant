@@ -52,7 +52,7 @@ The personal system is centered around the Life Atlas database and an “Assista
 
 ## Scripts
 - `scripts/agent.py`: Universal router for natural language requests.
-- `scripts/triage.py`: Lightweight triage via the VM MCP endpoint.
+- `scripts/triage.py`: Deprecated wrapper; use `scripts/fetch_tool_requests.py`.
 - `scripts/personal_task_analyzer.py`: Optional task analysis for the Personal Tasks database.
 - `scripts/personal_project_analyzer.py`: Optional analysis for the Projects database.
 - `scripts/tool_requests_log.py`: Quick entry helper for the Tool Requests / Friction Log backlog.

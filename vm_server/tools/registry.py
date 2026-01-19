@@ -9,6 +9,8 @@ from tools import (
     hello,
     mood,
     notion_editor,
+    photo_of_physical_items_like_kitchen_stuff,
+    receipt_photo_pantry_inventory,
     serendipity,
     system_overview,
     tool_requests,
@@ -27,5 +29,7 @@ def register_tools(mcp: FastMCP) -> None:
         tool_requests,
         notion_editor,
         health,
+        photo_of_physical_items_like_kitchen_stuff,
+        receipt_photo_pantry_inventory,
     ):
         module.register(mcp)
