@@ -15,6 +15,7 @@ restart the MCP server service.
 - `vm/status.sh` : show systemd status + last 50 logs
 - `vm/logs.sh`   : tail service logs (journalctl -f) or `--lines N`
 - `vm/deploy.sh` : rsync code to VM + restart service + health check
+- `vm/test_hook.sh` : test the post-push hook without actually pushing
 - `vm/pull_server_from_vm.sh` : pull the live server code from the VM
 - `vm/mcp_curl.sh` : call MCP tools with correct headers
 - `vm/health_check.sh` : canonical health check (HTTP + MCP)
@@ -52,6 +53,10 @@ git push origin main
 
 **To test:**
 ```bash
+# Test the hook without pushing
+./vm/test_hook.sh
+
+# Or test with an actual push
 echo "# Test" >> README.md
 git add README.md
 git commit -m "Test auto-deploy"
