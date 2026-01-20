@@ -352,13 +352,22 @@ async def _query_by_title(
 
 
 async def _query_all_items(
-    client: httpx.AsyncClient, token: str, db_id: str
+    client: httpx.AsyncClient, token: str, db_id: str, category: str | None = None
 ) -> List[Dict[str, Any]]:
-    """Query all items from pantry database for fuzzy matching"""
+    """Query all items from pantry database for fuzzy matching, optionally filtered by category"""
+    payload = {"page_size": 100}  # Get up to 100 items
+    
+    # Add category filter if provided
+    if category:
+        payload["filter"] = {
+            "property": "Food Category",
+            "select": {"equals": category}
+        }
+    
     resp = await client.post(
         f"{NOTION_API_BASE}/databases/{db_id}/query",
         headers=_headers(token),
-        json={"page_size": 100}  # Get up to 100 items
+        json=payload,
     )
     if resp.status_code >= 400:
         return []
@@ -371,13 +380,14 @@ async def _find_fuzzy_match(
     db_id: str,
     title_prop: str,
     item_name: str,
+    category: str | None = None,
     threshold: float = 0.7
 ) -> tuple[Dict[str, Any] | None, float]:
     """
-    Find best fuzzy match for item_name in database.
+    Find best fuzzy match for item_name in database, optionally within same category.
     Returns (matched_page, score) or (None, 0.0) if no good match.
     """
-    all_items = await _query_all_items(client, token, db_id)
+    all_items = await _query_all_items(client, token, db_id, category=category)
     
     best_match = None
     best_score = 0.0
@@ -560,11 +570,13 @@ def register(mcp: FastMCP) -> None:
                 item = entry["item"]
                 name = item.get("name", "")
                 quantity = item.get("quantity", 1) or 1
+                category = item.get("category")  # Get category for filtering
                 
                 if check_existing:
-                    # Try fuzzy matching first
+                    # Try fuzzy matching first, filtered by category if available
                     matched_page, score = await _find_fuzzy_match(
-                        client, token, db_id, title_prop, name, threshold=0.7
+                        client, token, db_id, title_prop, name, 
+                        category=category, threshold=0.7
                     )
                     
                     if matched_page:
