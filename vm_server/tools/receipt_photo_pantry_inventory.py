@@ -522,7 +522,7 @@ def register(mcp: FastMCP) -> None:
         skipped_existing: List[Dict[str, Any]] = []
         missing_properties: List[str] = []
         preview_errors: List[str] = []
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=60) as client:  # Increased timeout for large databases
             try:
                 database = await _fetch_database(client, token, db_id)
             except RuntimeError as exc:
