@@ -1,6 +1,6 @@
 # Project Context (Codex)
 
-Last updated: 2026-01-14
+Last updated: 2026-01-20
 
 ## Purpose
 - Personal assistant for Jordane Frechet using Codex CLI.
@@ -31,6 +31,14 @@ Last updated: 2026-01-14
 - Google Workspace MCP: `mcp-gsuite-enhanced` configured via `codex mcp add`.
   - Uses local venv executable at `mcp-gsuite-enhanced/.venv/bin/mcp-gsuite-enhanced`.
   - OAuth files live locally in `mcp-gsuite-enhanced/` and are gitignored.
+
+## VM Deployment
+- VM Host: 134.98.141.19 (mcp-lina.duckdns.org)
+- Deployment: Auto-deploys on `git push origin main` via post-push hook
+- Configuration: `vm/config.sh` (gitignored, copy from `vm/config.example.sh`)
+- Manual deployment: `./vm/deploy.sh`
+- Service: `mcp-server.service` on Ubuntu VM
+- Health check: `./vm/health_check.sh` or `https://mcp-lina.duckdns.org/health`
 
 ## Scripts
 - `scripts/personal_task_analyzer.py` (Personal Tasks)

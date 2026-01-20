@@ -19,13 +19,44 @@ restart the MCP server service.
 - `vm/mcp_curl.sh` : call MCP tools with correct headers
 - `vm/health_check.sh` : canonical health check (HTTP + MCP)
 
-## One true workflow
+## Workflows
+
+### Auto-deployment (Recommended)
+When `vm/config.sh` exists, deployment happens automatically on every push to `main`:
+```bash
+git add .
+git commit -m "Update MCP tools"
+git push origin main
+# 🚀 Deployment triggers automatically!
+```
+
+### Manual deployment
 1) Deploy: `./vm/deploy.sh`
 2) Check health: `./vm/health_check.sh`
 3) Call a tool: `./vm/mcp_curl.sh <tool> '{\"...\": \"...\"}'`
 4) Pull server code (if needed): `./vm/pull_server_from_vm.sh`
 5) Run Toolbox UI: `python3 scripts/toolbox_ui.py`
 6) Restart only: `./vm/deploy.sh --restart-only`
+
+## Git Hook Auto-Deployment
+
+**How it works:**
+- A `post-push` git hook triggers deployment after pushing to `main`
+- Only runs when `vm/config.sh` exists
+- Shows deployment progress in your terminal
+- Safe: uses the same `deploy.sh` script as manual deployment
+
+**To disable:**
+- Delete or rename `vm/config.sh`
+- Hook will skip deployment when config is missing
+
+**To test:**
+```bash
+echo "# Test" >> README.md
+git add README.md
+git commit -m "Test auto-deploy"
+git push origin main
+```
 
 ## Deploy behavior
 - Uses `rsync` to copy `VM_LOCAL_SRC/` to `VM_DEST_DIR/`.
