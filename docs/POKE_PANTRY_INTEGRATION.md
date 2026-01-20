@@ -2,6 +2,33 @@
 
 **Tool Name:** `receipt_photo_pantry_inventory`
 
+## 🚨 IMPORTANT: Send Structured Items, Not Raw Text
+
+**❌ DO NOT** send raw receipt text like this:
+```json
+{
+  "receipt_text": "LAIT 6,90 €\nBROCOLI 1,79 €",  // ❌ BAD
+  "dry_run": false,
+  "confirm": true
+}
+```
+
+**✅ DO** parse the receipt first and send structured items:
+```json
+{
+  "items": [                                       // ✅ GOOD
+    {"name": "Milk", "quantity": 1, "price": 6.90},
+    {"name": "Broccoli", "quantity": 1, "price": 1.79}
+  ],
+  "dry_run": false,
+  "confirm": true
+}
+```
+
+**Why?** The tool's basic text parser is too simple. Poke should do the OCR/extraction work and send clean structured data.
+
+---
+
 ## 📋 Complete Request Format
 
 ```json
