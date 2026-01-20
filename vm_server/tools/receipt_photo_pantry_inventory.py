@@ -550,6 +550,11 @@ def register(mcp: FastMCP) -> None:
             preview = _preview_payloads(deduped, property_map, properties, preview_errors)
             if preview_errors:
                 errors.extend(preview_errors)
+            
+            # DEBUG: Log preview payloads
+            import sys
+            import json as json_lib
+            print(f"[DEBUG] Preview first item properties: {json_lib.dumps(preview[0]['properties'] if preview else {}, indent=2)}", file=sys.stderr, flush=True)
 
             for entry in preview:
                 item = entry["item"]
