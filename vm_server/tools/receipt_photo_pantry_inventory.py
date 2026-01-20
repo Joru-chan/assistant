@@ -12,12 +12,19 @@ NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
 DEFAULT_PROPERTY_MAP = {
-    "name": "Name",
+    "name": "Item Name",
     "quantity": "Quantity",
     "unit": "Unit",
-    "category": "Category",
+    "category": "Food Category",
     "purchase_date": "Purchase Date",
     "store": "Store",
+    "expiration_date": "Expiration Date",
+    "notes": "Notes",
+    "receipt_number": "Receipt Number",
+    "replenish": "Replenish",
+    "status": "Status",
+    "storage_location": "Storage Location",
+    "price": "Price",
 }
 
 SKIP_KEYWORDS = {
@@ -56,6 +63,67 @@ def _notion_error_message(response: httpx.Response) -> str:
 
 def _normalize_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _fuzzy_match_score(name1: str, name2: str) -> float:
+    """Calculate fuzzy match score between two names (0-1, higher is better)"""
+    norm1 = _normalize_name(name1)
+    norm2 = _normalize_name(name2)
+    
+    if norm1 == norm2:
+        return 1.0
+    
+    # Check if one contains the other
+    if norm1 in norm2 or norm2 in norm1:
+        return 0.8
+    
+    # Calculate word overlap
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    overlap = len(words1 & words2)
+    total = len(words1 | words2)
+    
+    return overlap / total if total > 0 else 0.0
+
+
+def _append_price_to_notes(
+    existing_notes: str | None, 
+    price: float, 
+    date: str, 
+    store: str
+) -> str:
+    """Append price history to notes field as JSON"""
+    import json
+    
+    # Parse existing price history
+    price_history = []
+    if existing_notes:
+        try:
+            # Try to extract JSON array from notes
+            match = re.search(r'\[.*\]', existing_notes, re.DOTALL)
+            if match:
+                price_history = json.loads(match.group(0))
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    
+    # Add new price entry
+    price_history.append({
+        "price": price,
+        "date": date,
+        "store": store
+    })
+    
+    # Format as nice text with JSON
+    lines = ["Price History:"]
+    for entry in price_history:
+        lines.append(f"  ${entry['price']} at {entry['store']} on {entry['date']}")
+    
+    lines.append(f"\nRaw: {json.dumps(price_history)}")
+    return "\n".join(lines)
 
 
 def _extract_price(line: str) -> str:
