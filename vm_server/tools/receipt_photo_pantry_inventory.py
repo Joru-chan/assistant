@@ -608,6 +608,12 @@ def register(mcp: FastMCP) -> None:
                     "parent": {"database_id": db_id},
                     "properties": entry["properties"],
                 }
+                
+                # DEBUG: Log what we're about to create
+                import sys
+                import json as json_lib
+                print(f"[DEBUG] Creating new item '{name}' with properties: {json_lib.dumps(entry['properties'], indent=2)}", file=sys.stderr, flush=True)
+                
                 resp = await client.post(
                     f"{NOTION_API_BASE}/pages",
                     headers=_headers(token),
