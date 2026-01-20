@@ -65,7 +65,7 @@
 - **Properties:** Title, Description, Desired outcome, Frequency, Impact, Domain, Status, Source, Created time, Last updated time, Link(s), Notes/constraints
 
 #### Pantry / Inventory
-- **Database ID:** `d1cbbe500ca942a197924799fe6d9e03`
+- **Database ID:** `d0a0cde9ef57494984d46b44629656ed`
 - **Purpose:** Track pantry items, groceries, and kitchen inventory
 - **Properties:** Name, Quantity, Unit, Category, Purchase Date, Store
 - **Tool:** `receipt_photo_pantry_inventory` (MCP)
