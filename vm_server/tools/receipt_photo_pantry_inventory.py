@@ -460,8 +460,32 @@ def register(mcp: FastMCP) -> None:
         check_existing: bool = True,
     ) -> dict:
         """
-        Parse a receipt text (or structured items) into pantry inventory entries.
-        Read-only by default; set dry_run=false and confirm=true to write.
+        Add grocery items to pantry inventory from receipt data. Uses fuzzy matching to update existing items.
+        
+        Args:
+            receipt_text: Raw receipt text to parse (optional if items provided)
+            items: List of structured item objects. Each item should include:
+                - name (required): Item name/title
+                - quantity (optional): Numeric quantity (e.g., 1, 2.5, 0.564)
+                - unit (optional): Unit of measurement (e.g., "KG", "L", "G", "ML", "piece", "package")
+                - price (optional): Price as number (e.g., 1.79, 6.9)
+                - category (optional): Food category (e.g., "Fresh Produce", "Dairy & Eggs", "Meat & Seafood")
+                - expiration_date (optional): Expiration date as ISO string (e.g., "2026-01-26")
+                - storage_location (optional): Where stored (e.g., "Refrigerator", "Freezer", "Pantry", "Counter")
+                - notes (optional): Additional notes
+                - status (optional): Current status (e.g., "In Stock", "Running Low", "Out of Stock")
+                - receipt_number (optional): Receipt identifier
+                - replenish (optional): Whether to auto-replenish (boolean)
+            store: Store name (applies to all items if not specified per item)
+            purchase_date: Purchase date as ISO string (e.g., "2026-01-21")
+            dry_run: If true, preview only without writing to Notion (default: true)
+            confirm: Must be true to write to Notion (default: false)
+            pantry_db_id: Notion database ID (uses PANTRY_DB_ID env var if not provided)
+            property_map: Custom property name mappings (uses defaults if not provided)
+            check_existing: If true, uses fuzzy matching to update existing items instead of creating duplicates (default: true)
+        
+        Returns:
+            Dictionary with summary, result (items, created, skipped), next_actions, and errors
         """
         # DEBUG: Log incoming request
         import json as json_lib
