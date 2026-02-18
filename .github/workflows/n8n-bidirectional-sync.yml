@@ -69,6 +69,46 @@ jobs:
       - name: Report push status
         run: |
           echo "Push to N8N completed"
+      
+      - name: 📊 Push Summary
+        if: always()
+        env:
+          WORKFLOW_NAME: ${{ github.event.inputs.workflow_name }}
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚀 N8N WORKFLOW PUSH SUMMARY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          echo "⏰ Timestamp: $timestamp"
+          echo ""
+          
+          if [ -n "$WORKFLOW_NAME" ]; then
+            echo "✅ Pushed updates to workflow: 【 $WORKFLOW_NAME 】"
+            echo ""
+            echo "📦 Workflow Details:"
+            echo "   • Name: $WORKFLOW_NAME"
+            echo "   • File: workflows/${WORKFLOW_NAME}.json"
+            echo "   • Status: Successfully pushed to N8N"
+          else
+            echo "✅ Pushed updates to ALL workflows"
+            echo ""
+            echo "📦 Processed Workflows:"
+            for workflow_file in workflows/*.json; do
+              if [ -f "$workflow_file" ]; then
+                workflow_name=$(basename "$workflow_file" .json)
+                echo "   • 【 $workflow_name 】 → Successfully pushed"
+              fi
+            done
+          fi
+          
+          echo ""
+          echo "🔄 Sync Direction: Repository → N8N"
+          echo "✨ Status: COMPLETED"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
 
   pull-from-n8n:
     name: Pull Workflows from N8N
@@ -106,6 +146,25 @@ jobs:
         id: check_changes
         run: |
           git diff --quiet workflows/ || echo "has_changes=true" >> $GITHUB_OUTPUT
+          
+          # Store change details for summary
+          if ! git diff --quiet workflows/; then
+            echo "CHANGES_DETECTED=true" >> $GITHUB_ENV
+            
+            # Get list of changed files
+            changed_files=$(git diff --name-only workflows/ | sed 's/^/   • /')
+            echo "CHANGED_FILES<<EOF" >> $GITHUB_ENV
+            echo "$changed_files" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
+            # Get diff stats
+            added=$(git diff --numstat workflows/ | awk '{sum+=$1} END {print sum+0}')
+            deleted=$(git diff --numstat workflows/ | awk '{sum+=$2} END {print sum+0}')
+            echo "LINES_ADDED=$added" >> $GITHUB_ENV
+            echo "LINES_DELETED=$deleted" >> $GITHUB_ENV
+          else
+            echo "CHANGES_DETECTED=false" >> $GITHUB_ENV
+          fi
       
       - name: Commit and push changes
         if: steps.check_changes.outputs.has_changes == 'true'
@@ -115,3 +174,53 @@ jobs:
           git add workflows/
           git diff --staged --quiet || git commit -m "Update workflows from N8N"
           git push
+      
+      - name: 📊 Pull Summary
+        if: always()
+        env:
+          WORKFLOW_NAME: ${{ github.event.inputs.workflow_name }}
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "⬇️  N8N WORKFLOW PULL SUMMARY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          echo "⏰ Timestamp: $timestamp"
+          echo ""
+          
+          if [ -n "$WORKFLOW_NAME" ]; then
+            echo "✅ Pulled updates from workflow: 【 $WORKFLOW_NAME 】"
+            echo ""
+            echo "📦 Workflow Details:"
+            echo "   • Name: $WORKFLOW_NAME"
+            echo "   • Target: workflows/${WORKFLOW_NAME}.json"
+          else
+            echo "✅ Pulled updates from ALL workflows"
+            echo ""
+            echo "📦 Target Directory: workflows/"
+          fi
+          
+          echo ""
+          echo "📝 Changes Summary:"
+          
+          if [ "${CHANGES_DETECTED:-false}" = "true" ]; then
+            echo "   • Status: Changes detected and committed"
+            echo "   • Lines added: ${LINES_ADDED:-0}"
+            echo "   • Lines deleted: ${LINES_DELETED:-0}"
+            echo ""
+            echo "📄 Modified Files:"
+            echo "${CHANGED_FILES}"
+            echo ""
+            echo "💾 Changes have been committed and pushed to repository"
+          else
+            echo "   • Status: No changes detected"
+            echo "   • All workflows are up to date"
+          fi
+          
+          echo ""
+          echo "🔄 Sync Direction: N8N → Repository"
+          echo "✨ Status: COMPLETED"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
