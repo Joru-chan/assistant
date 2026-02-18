@@ -88,10 +88,10 @@ jobs:
             echo "🧪 Testing $test_name..."
             
             if [ "$DEBUG_MODE" == "true" ]; then
-              echo "Debug: curl -s -w '%{http_code}' -o response.json -H '$header' '$BASE_URL/rest/workflows'"
+              echo "Debug: curl -s -w '%{http_code}' -o response.json -H 'accept: application/json' -H '$header' '$BASE_URL/api/v1/workflows'"
             fi
             
-            HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -H "$header" "$BASE_URL/rest/workflows")
+            HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -H "accept: application/json" -H "$header" "$BASE_URL/api/v1/workflows")
             
             echo "HTTP Status: $HTTP_CODE"
             
@@ -123,7 +123,7 @@ jobs:
               404)
                 echo "❌ $test_name failed: 404 Not Found"
                 echo "The n8n API endpoint was not found. Check your base URL: $BASE_URL"
-                echo "Expected format: https://your-n8n-instance.com (without /rest/workflows)"
+                echo "Expected format: https://your-n8n-instance.com (without /api/v1/workflows)"
                 return 1
                 ;;
               *)
@@ -162,7 +162,7 @@ jobs:
             echo "4. Ensure the API key has proper permissions in n8n"
             echo "5. Try running with debug_mode: true for more details"
             echo ""
-            echo "Expected n8n API endpoint: $BASE_URL/rest/workflows"
+            echo "Expected n8n API endpoint: $BASE_URL/api/v1/workflows"
             exit 1
           fi
           
@@ -177,12 +177,12 @@ jobs:
           
           # Get n8n version and health info
           echo "Getting version info..."
-          HTTP_CODE=$(curl -s -w '%{http_code}' -o version.json -H "$AUTH_HEADER" "$BASE_URL/rest/active-workflows")
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o version.json -H "accept: application/json" -H "$AUTH_HEADER" "$BASE_URL/api/v1/workflows")
           
           if [ "$HTTP_CODE" == "200" ]; then
             echo "✅ n8n API is accessible"
             if [ "$DEBUG_MODE" == "true" ]; then
-              echo "Active workflows response:"
+              echo "Workflows response:"
               cat version.json | jq '.' 2>/dev/null || cat version.json
             fi
           else
@@ -202,7 +202,7 @@ jobs:
           
           # Get list of workflows
           echo "Getting workflow list..."
-          HTTP_CODE=$(curl -s -w '%{http_code}' -o workflows_list.json -H "$AUTH_HEADER" "$BASE_URL/rest/workflows")
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o workflows_list.json -H "accept: application/json" -H "$AUTH_HEADER" "$BASE_URL/api/v1/workflows")
           
           if [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Failed to get workflows list (HTTP $HTTP_CODE)"
@@ -246,7 +246,7 @@ jobs:
             
             echo "📥 Downloading: $workflow_name (ID: $workflow_id)"
             
-            HTTP_CODE=$(curl -s -w '%{http_code}' -o "workflow_temp.json" -H "$AUTH_HEADER" "$BASE_URL/rest/workflows/$workflow_id")
+            HTTP_CODE=$(curl -s -w '%{http_code}' -o "workflow_temp.json" -H "accept: application/json" -H "$AUTH_HEADER" "$BASE_URL/api/v1/workflows/$workflow_id")
             
             if [ "$HTTP_CODE" == "200" ]; then
               # Clean filename for filesystem
@@ -285,7 +285,7 @@ jobs:
           
           # Get existing workflows from n8n
           echo "Getting existing workflows..."
-          HTTP_CODE=$(curl -s -w '%{http_code}' -o workflows_list.json -H "$AUTH_HEADER" "$BASE_URL/rest/workflows")
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o workflows_list.json -H "accept: application/json" -H "$AUTH_HEADER" "$BASE_URL/api/v1/workflows")
           
           if [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Failed to get workflows list (HTTP $HTTP_CODE)"
@@ -322,10 +322,10 @@ jobs:
             
             if [ "$EXISTING_ID" != "null" ] && [ -n "$EXISTING_ID" ]; then
               echo "  🔄 Updating existing workflow (ID: $EXISTING_ID)"
-              HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -X PUT -H "$AUTH_HEADER" -H "Content-Type: application/json" -d @"$workflow_file" "$BASE_URL/rest/workflows/$EXISTING_ID")
+              HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -X PUT -H "accept: application/json" -H "$AUTH_HEADER" -H "Content-Type: application/json" -d @"$workflow_file" "$BASE_URL/api/v1/workflows/$EXISTING_ID")
             else
               echo "  ➕ Creating new workflow"
-              HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" -d @"$workflow_file" "$BASE_URL/rest/workflows")
+              HTTP_CODE=$(curl -s -w '%{http_code}' -o response.json -X POST -H "accept: application/json" -H "$AUTH_HEADER" -H "Content-Type: application/json" -d @"$workflow_file" "$BASE_URL/api/v1/workflows")
             fi
             
             if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "201" ]; then
