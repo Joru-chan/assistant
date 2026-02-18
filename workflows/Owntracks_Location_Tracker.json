@@ -32,7 +32,8 @@
         "conditions": {
           "boolean": [
             {
-              "value1": "={{ $json.skip }}"
+              "value1": "={{ $json.skip }}",
+              "value2": false
             }
           ]
         }
