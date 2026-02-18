@@ -1,0 +1,523 @@
+name: Update n8n
+
+# This workflow updates n8n on the VM
+# It detects the installation method (Docker, npm, or systemd) and updates accordingly
+on:
+  workflow_dispatch:
+    inputs:
+      force_restart:
+        description: 'Force restart even if update fails'
+        required: false
+        type: boolean
+        default: false
+      skip_backup:
+        description: 'Skip database backup before update'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  update-n8n:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # SSH SETUP (Same pattern as deploy.yml)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      
+      - name: Debug SSH Configuration
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 SSH Configuration Debug"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "VM_HOST: ${{ secrets.VM_HOST }}"
+          echo "VM_USER: ${{ secrets.VM_USER }}"
+          echo "SSH key configured: ${{ secrets.VMSSHPRIVATE_KEY_B64 != '' }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Setup SSH
+        run: |
+          echo "🔐 Setting up SSH connection..."
+          
+          # Create SSH directory
+          mkdir -p ~/.ssh
+          
+          # Decode and save the base64-encoded SSH private key
+          echo "${{ secrets.VMSSHPRIVATE_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          
+          # Set restrictive permissions on the key (required by SSH)
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Add VM host to known_hosts to avoid host verification prompt
+          echo "📝 Adding VM host to known_hosts..."
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+          
+          # Test SSH connection
+          echo "🔌 Testing SSH connection..."
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo '✅ SSH connection successful'"
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # DETECT N8N INSTALLATION METHOD
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Detect n8n installation method
+        id: detect
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 Detecting n8n installation method..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Run detection script on the VM
+          detection_output=$(ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} 'bash -s' << 'DETECT_SCRIPT'
+          
+          # Initialize variables
+          INSTALL_METHOD="unknown"
+          N8N_SERVICE=""
+          N8N_VERSION=""
+          DOCKER_CONTAINER=""
+          
+          # Check for Docker installation
+          echo "🐳 Checking for Docker installation..."
+          if command -v docker &> /dev/null; then
+            # Look for n8n container (running or stopped)
+            DOCKER_CONTAINER=$(docker ps -a --filter "name=n8n" --format "{{.Names}}" | head -n1)
+            if [ ! -z "$DOCKER_CONTAINER" ]; then
+              INSTALL_METHOD="docker"
+              N8N_SERVICE="$DOCKER_CONTAINER"
+              # Get version from container
+              N8N_VERSION=$(docker exec $DOCKER_CONTAINER n8n --version 2>/dev/null || echo "unknown")
+              echo "✅ Found n8n Docker container: $DOCKER_CONTAINER"
+              echo "   Current version: $N8N_VERSION"
+            fi
+          fi
+          
+          # Check for systemd service if not found in Docker
+          if [ "$INSTALL_METHOD" = "unknown" ]; then
+            echo "🔧 Checking for systemd service..."
+            if systemctl list-unit-files | grep -q "n8n.service"; then
+              INSTALL_METHOD="systemd"
+              N8N_SERVICE="n8n.service"
+              # Try to get version
+              N8N_VERSION=$(n8n --version 2>/dev/null || echo "unknown")
+              echo "✅ Found n8n systemd service: n8n.service"
+              echo "   Current version: $N8N_VERSION"
+            fi
+          fi
+          
+          # Check for npm global installation if not found yet
+          if [ "$INSTALL_METHOD" = "unknown" ]; then
+            echo "📦 Checking for npm installation..."
+            if command -v n8n &> /dev/null; then
+              INSTALL_METHOD="npm"
+              N8N_VERSION=$(n8n --version 2>/dev/null || echo "unknown")
+              echo "✅ Found n8n npm installation"
+              echo "   Current version: $N8N_VERSION"
+            fi
+          fi
+          
+          # Output results
+          if [ "$INSTALL_METHOD" = "unknown" ]; then
+            echo "❌ n8n installation not found!"
+            exit 1
+          fi
+          
+          # Return results (these will be captured)
+          echo "INSTALL_METHOD=$INSTALL_METHOD"
+          echo "N8N_SERVICE=$N8N_SERVICE"
+          echo "N8N_VERSION=$N8N_VERSION"
+          echo "DOCKER_CONTAINER=$DOCKER_CONTAINER"
+          
+          DETECT_SCRIPT
+          )
+          
+          # Parse the output and set environment variables
+          echo "$detection_output"
+          
+          INSTALL_METHOD=$(echo "$detection_output" | grep "INSTALL_METHOD=" | cut -d'=' -f2)
+          N8N_SERVICE=$(echo "$detection_output" | grep "N8N_SERVICE=" | cut -d'=' -f2)
+          N8N_VERSION=$(echo "$detection_output" | grep "N8N_VERSION=" | cut -d'=' -f2)
+          DOCKER_CONTAINER=$(echo "$detection_output" | grep "DOCKER_CONTAINER=" | cut -d'=' -f2)
+          
+          # Set outputs for next steps
+          echo "install_method=$INSTALL_METHOD" >> $GITHUB_OUTPUT
+          echo "service_name=$N8N_SERVICE" >> $GITHUB_OUTPUT
+          echo "current_version=$N8N_VERSION" >> $GITHUB_OUTPUT
+          echo "docker_container=$DOCKER_CONTAINER" >> $GITHUB_OUTPUT
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Detection Results:"
+          echo "   Installation Method: $INSTALL_METHOD"
+          echo "   Service Name: $N8N_SERVICE"
+          echo "   Current Version: $N8N_VERSION"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # BACKUP N8N DATABASE (Optional)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Backup n8n database
+        if: ${{ !inputs.skip_backup }}
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "💾 Creating backup of n8n database..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'BACKUP_SCRIPT'
+          
+          # Create backup directory if it doesn't exist
+          BACKUP_DIR="$HOME/n8n_backups"
+          mkdir -p "$BACKUP_DIR"
+          
+          # Generate timestamp for backup filename
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+          BACKUP_FILE="$BACKUP_DIR/n8n_backup_$TIMESTAMP.tar.gz"
+          
+          # Common n8n data locations
+          N8N_DATA_DIRS=(
+            "$HOME/.n8n"
+            "/root/.n8n"
+            "/home/n8n/.n8n"
+          )
+          
+          # Find and backup n8n data directory
+          for dir in "${N8N_DATA_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "📁 Found n8n data directory: $dir"
+              echo "📦 Creating backup..."
+              tar -czf "$BACKUP_FILE" "$dir" 2>/dev/null || true
+              
+              if [ -f "$BACKUP_FILE" ]; then
+                BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+                echo "✅ Backup created: $BACKUP_FILE ($BACKUP_SIZE)"
+                
+                # Keep only last 5 backups
+                echo "🧹 Cleaning old backups (keeping last 5)..."
+                ls -t "$BACKUP_DIR"/n8n_backup_*.tar.gz | tail -n +6 | xargs -r rm -f
+                echo "✅ Backup complete"
+              else
+                echo "⚠️  Backup file not created"
+              fi
+              break
+            fi
+          done
+          
+          BACKUP_SCRIPT
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # UPDATE N8N (Docker method)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Update n8n (Docker)
+        if: steps.detect.outputs.install_method == 'docker'
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🐳 Updating n8n via Docker..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'DOCKER_UPDATE'
+          
+          CONTAINER_NAME="${{ steps.detect.outputs.docker_container }}"
+          
+          echo "📦 Container: $CONTAINER_NAME"
+          echo "⏸️  Stopping container..."
+          docker stop "$CONTAINER_NAME" || echo "⚠️  Container already stopped"
+          
+          echo "🗑️  Removing old container..."
+          docker rm "$CONTAINER_NAME" || echo "⚠️  Container already removed"
+          
+          echo "📥 Pulling latest n8n image..."
+          docker pull n8nio/n8n:latest
+          
+          echo "🚀 Starting new container with latest image..."
+          # Note: This assumes the container was originally created with docker-compose
+          # or you may need to adjust the docker run command with proper flags
+          if [ -f "$HOME/docker-compose.yml" ] || [ -f "$HOME/n8n/docker-compose.yml" ]; then
+            echo "📋 Found docker-compose.yml, using docker-compose..."
+            cd "$HOME" && docker-compose up -d n8n || cd "$HOME/n8n" && docker-compose up -d
+          else
+            echo "⚠️  No docker-compose.yml found. Container needs manual restart."
+            echo "   Please restart the container manually with the appropriate docker run command."
+            exit 1
+          fi
+          
+          # Wait for container to start
+          echo "⏳ Waiting for container to start..."
+          sleep 5
+          
+          # Check if container is running
+          if docker ps | grep -q "$CONTAINER_NAME"; then
+            NEW_VERSION=$(docker exec "$CONTAINER_NAME" n8n --version 2>/dev/null || echo "unknown")
+            echo "✅ n8n updated successfully!"
+            echo "   New version: $NEW_VERSION"
+          else
+            echo "❌ Container failed to start"
+            exit 1
+          fi
+          
+          DOCKER_UPDATE
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # UPDATE N8N (npm method)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Update n8n (npm)
+        if: steps.detect.outputs.install_method == 'npm'
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 Updating n8n via npm..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'NPM_UPDATE'
+          
+          echo "📥 Updating n8n globally via npm..."
+          npm update -g n8n
+          
+          NEW_VERSION=$(n8n --version 2>/dev/null || echo "unknown")
+          echo "✅ n8n updated successfully!"
+          echo "   New version: $NEW_VERSION"
+          
+          NPM_UPDATE
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # UPDATE N8N (systemd method)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Update n8n (systemd)
+        if: steps.detect.outputs.install_method == 'systemd'
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔧 Updating n8n (systemd service)..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'SYSTEMD_UPDATE'
+          
+          SERVICE_NAME="${{ steps.detect.outputs.service_name }}"
+          
+          echo "⏸️  Stopping n8n service: $SERVICE_NAME"
+          sudo systemctl stop "$SERVICE_NAME"
+          
+          echo "📥 Updating n8n via npm..."
+          npm update -g n8n
+          
+          NEW_VERSION=$(n8n --version 2>/dev/null || echo "unknown")
+          echo "✅ n8n updated successfully!"
+          echo "   New version: $NEW_VERSION"
+          
+          echo "🚀 Starting n8n service: $SERVICE_NAME"
+          sudo systemctl start "$SERVICE_NAME"
+          
+          SYSTEMD_UPDATE
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # RESTART N8N SERVICE
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Restart n8n service
+        if: steps.detect.outputs.install_method == 'systemd' || inputs.force_restart
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔄 Restarting n8n service..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'RESTART_SCRIPT'
+          
+          INSTALL_METHOD="${{ steps.detect.outputs.install_method }}"
+          SERVICE_NAME="${{ steps.detect.outputs.service_name }}"
+          
+          if [ "$INSTALL_METHOD" = "systemd" ]; then
+            echo "🔧 Restarting systemd service: $SERVICE_NAME"
+            sudo systemctl daemon-reload
+            sudo systemctl restart "$SERVICE_NAME"
+            echo "✅ Service restart command sent"
+          elif [ "$INSTALL_METHOD" = "docker" ]; then
+            echo "🐳 Restarting Docker container: $SERVICE_NAME"
+            docker restart "$SERVICE_NAME"
+            echo "✅ Container restarted"
+          else
+            echo "⚠️  No automatic restart available for npm installation"
+            echo "   Please restart n8n manually if needed"
+          fi
+          
+          RESTART_SCRIPT
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # VERIFY N8N IS RUNNING
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Verify n8n status
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 Verifying n8n status..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Wait a moment for services to stabilize
+          echo "⏳ Waiting 10 seconds for service to stabilize..."
+          sleep 10
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -s' << 'VERIFY_SCRIPT'
+          
+          INSTALL_METHOD="${{ steps.detect.outputs.install_method }}"
+          SERVICE_NAME="${{ steps.detect.outputs.service_name }}"
+          SUCCESS=false
+          
+          if [ "$INSTALL_METHOD" = "systemd" ]; then
+            echo "🔧 Checking systemd service status..."
+            if sudo systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1; then
+              echo "✅ Service is active and running"
+              sudo systemctl status "$SERVICE_NAME" --no-pager | head -n 10
+              SUCCESS=true
+            else
+              echo "❌ Service is not active"
+              sudo systemctl status "$SERVICE_NAME" --no-pager
+            fi
+            
+          elif [ "$INSTALL_METHOD" = "docker" ]; then
+            echo "🐳 Checking Docker container status..."
+            if docker ps | grep -q "$SERVICE_NAME"; then
+              echo "✅ Container is running"
+              docker ps | grep "$SERVICE_NAME"
+              SUCCESS=true
+            else
+              echo "❌ Container is not running"
+              docker ps -a | grep "$SERVICE_NAME"
+            fi
+            
+          elif [ "$INSTALL_METHOD" = "npm" ]; then
+            echo "📦 Checking n8n process..."
+            if pgrep -f "n8n" > /dev/null; then
+              echo "✅ n8n process is running"
+              ps aux | grep n8n | grep -v grep
+              SUCCESS=true
+            else
+              echo "⚠️  n8n process not found (may need manual start)"
+            fi
+          fi
+          
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ Verification failed"
+            exit 1
+          fi
+          
+          # Try to get the new version
+          NEW_VERSION=$(n8n --version 2>/dev/null || docker exec "$SERVICE_NAME" n8n --version 2>/dev/null || echo "unknown")
+          echo ""
+          echo "📊 Current n8n version: $NEW_VERSION"
+          
+          VERIFY_SCRIPT
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # HEALTH CHECK
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: n8n health check
+        continue-on-error: true
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🏥 Running n8n health check..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Common n8n ports
+          N8N_PORTS=(5678 5679 443 80)
+          
+          for PORT in "${N8N_PORTS[@]}"; do
+            echo "🔍 Checking port $PORT..."
+            
+            # Try HTTP health check
+            response=$(curl -s -w "\nHTTP_STATUS:%{http_code}\n" \
+              "http://${{ secrets.VM_HOST }}:$PORT/healthz" 2>/dev/null || echo "HTTP_STATUS:000")
+            
+            status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+            
+            if [[ "$status" == 2* ]]; then
+              echo "✅ n8n is responding on port $PORT (HTTP $status)"
+              break
+            else
+              echo "⚠️  Port $PORT returned status $status"
+            fi
+          done
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # CLEANUP
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Cleanup SSH keys
+        if: always()
+        run: |
+          echo "🧹 Cleaning up SSH keys..."
+          rm -f ~/.ssh/deploy_key
+          echo "✅ Cleanup complete"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # SUMMARY
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      - name: Update summary
+        if: success()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 n8n Update Completed Successfully!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📍 Target VM: ${{ secrets.VM_HOST }}"
+          echo "🔧 Installation Method: ${{ steps.detect.outputs.install_method }}"
+          echo "📦 Service/Container: ${{ steps.detect.outputs.service_name }}"
+          echo "📊 Previous Version: ${{ steps.detect.outputs.current_version }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "✅ n8n has been updated and is running"
+          echo "🔍 Check the logs above for the new version number"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Update failure notice
+        if: failure()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "❌ n8n Update Failed!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Please check the logs above for details."
+          echo "You may need to manually investigate the VM."
+          echo ""
+          echo "🔍 Installation Method: ${{ steps.detect.outputs.install_method }}"
+          echo "📦 Service/Container: ${{ steps.detect.outputs.service_name }}"
+          echo ""
+          echo "💡 Troubleshooting tips:"
+          echo "   - SSH to VM: ssh ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}"
+          echo "   - Check service status manually"
+          echo "   - Review n8n logs for errors"
+          echo "   - Restore from backup if needed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          exit 1
