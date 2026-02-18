@@ -1,19 +1,27 @@
 name: N8N Bidirectional Workflow Sync
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'workflows/**'
   workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
+    inputs:
+      sync_direction:
+        description: 'Sync direction'
+        required: true
+        type: choice
+        options:
+          - push
+          - pull
+        default: 'push'
+      workflow_name:
+        description: 'Workflow name (optional - leave empty for all workflows)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   push-to-n8n:
     name: Push Workflows to N8N
     runs-on: ubuntu-latest
+    if: github.event.inputs.sync_direction == 'push'
     
     steps:
       - name: Checkout repository
@@ -31,15 +39,32 @@ jobs:
       - name: Push workflows to N8N
         env:
           N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+          WORKFLOW_NAME: ${{ github.event.inputs.workflow_name }}
         run: |
           echo "Pushing workflows to N8N..."
-          for workflow_file in workflows/*.json; do
+          
+          if [ -n "$WORKFLOW_NAME" ]; then
+            # Push specific workflow
+            workflow_file="workflows/${WORKFLOW_NAME}.json"
             if [ -f "$workflow_file" ]; then
-              echo "Processing: $workflow_file"
+              echo "Processing specific workflow: $workflow_file"
               workflow_name=$(basename "$workflow_file" .json)
               echo "Workflow name: $workflow_name"
+            else
+              echo "Error: Workflow file not found: $workflow_file"
+              exit 1
             fi
-          done
+          else
+            # Push all workflows
+            echo "Processing all workflows..."
+            for workflow_file in workflows/*.json; do
+              if [ -f "$workflow_file" ]; then
+                echo "Processing: $workflow_file"
+                workflow_name=$(basename "$workflow_file" .json)
+                echo "Workflow name: $workflow_name"
+              fi
+            done
+          fi
       
       - name: Report push status
         run: |
@@ -48,6 +73,7 @@ jobs:
   pull-from-n8n:
     name: Pull Workflows from N8N
     runs-on: ubuntu-latest
+    if: github.event.inputs.sync_direction == 'pull'
     
     steps:
       - name: Checkout repository
@@ -65,9 +91,16 @@ jobs:
       - name: Pull workflows from N8N
         env:
           N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+          WORKFLOW_NAME: ${{ github.event.inputs.workflow_name }}
         run: |
           echo "Pulling workflows from N8N..."
           echo "N8N API configured"
+          
+          if [ -n "$WORKFLOW_NAME" ]; then
+            echo "Pulling specific workflow: $WORKFLOW_NAME"
+          else
+            echo "Pulling all workflows"
+          fi
       
       - name: Check for changes
         id: check_changes
@@ -75,6 +108,7 @@ jobs:
           git diff --quiet workflows/ || echo "has_changes=true" >> $GITHUB_OUTPUT
       
       - name: Commit and push changes
+        if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
