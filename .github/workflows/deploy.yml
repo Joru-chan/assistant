@@ -1,0 +1,190 @@
+name: Deploy to VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vm_server/**'
+      - 'vm/deploy.sh'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      restart_only:
+        description: 'Restart only (skip rsync and dependency sync)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          echo "🔐 Setting up SSH connection..."
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Add VM host to known_hosts
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+          
+          # Test SSH connection
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo '✅ SSH connection successful'"
+
+      - name: Sync code to VM
+        if: ${{ !inputs.restart_only }}
+        run: |
+          echo "📦 Syncing code from vm_server/ to VM..."
+          
+          rsync -avz --progress \
+            --exclude='venv/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='*.bak*' \
+            --exclude='*~' \
+            --exclude='.env' \
+            --exclude='memory/' \
+            --exclude='.git/' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            vm_server/ ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VM_DEST_DIR }}/
+          
+          echo "✅ Code sync complete"
+
+      - name: Install dependencies
+        if: ${{ !inputs.restart_only }}
+        run: |
+          echo "📚 Installing Python dependencies..."
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "if [ -f '${{ secrets.VM_DEST_DIR }}/requirements.txt' ]; then \
+              echo 'Found requirements.txt, installing dependencies...'; \
+              ${{ secrets.VM_VENV_PY }} -m pip install --upgrade pip && \
+              ${{ secrets.VM_VENV_PY }} -m pip install -r '${{ secrets.VM_DEST_DIR }}/requirements.txt'; \
+              echo '✅ Dependencies installed'; \
+            else \
+              echo '⚠️  No requirements.txt found, skipping dependency installation'; \
+            fi"
+
+      - name: Restart service
+        run: |
+          echo "🔄 Restarting ${{ secrets.VM_SERVICE }}..."
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "sudo systemctl daemon-reload && sudo systemctl restart ${{ secrets.VM_SERVICE }}"
+          
+          echo "✅ Service restart command sent"
+          echo "⏳ Waiting 5 seconds for service to initialize..."
+          sleep 5
+
+      - name: Verify service status
+        run: |
+          echo "🔍 Checking service status..."
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "sudo systemctl is-active ${{ secrets.VM_SERVICE }} && \
+             echo '✅ Service is active' || \
+             (echo '❌ Service is not active' && \
+              sudo systemctl status ${{ secrets.VM_SERVICE }} && \
+              exit 1)"
+
+      - name: MCP health check
+        run: |
+          echo "🏥 Running MCP health check..."
+          
+          max_attempts=10
+          attempt=0
+          success=false
+          
+          while [ $attempt -lt $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts..."
+            
+            response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json, text/event-stream" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"health_check","arguments":{}}}' \
+              "${{ secrets.VM_MCP_URL }}" || echo "HTTP_STATUS:000")
+            
+            status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+            body=$(echo "$response" | sed '$d')
+            
+            if [[ "$status" == 2* ]]; then
+              echo "✅ MCP health check successful (HTTP $status)"
+              echo "Response: $(echo "$body" | head -n1)"
+              success=true
+              break
+            else
+              echo "⚠️  MCP returned status $status"
+              if [ $attempt -lt $max_attempts ]; then
+                echo "Retrying in 2 seconds..."
+                sleep 2
+              fi
+            fi
+          done
+          
+          if [ "$success" = false ]; then
+            echo "❌ MCP health check failed after $max_attempts attempts"
+            exit 1
+          fi
+
+      - name: HTTP health check (fallback)
+        if: failure()
+        run: |
+          echo "🏥 Running HTTP health check (fallback)..."
+          
+          response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
+            "${{ secrets.VM_HEALTH_URL }}" || echo "HTTP_STATUS:000")
+          
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          body=$(echo "$response" | sed '$d')
+          
+          if [[ "$status" == 2* ]]; then
+            echo "✅ HTTP health check successful (HTTP $status)"
+            echo "Response: $body"
+          else
+            echo "❌ HTTP health check failed (HTTP $status)"
+            echo "Response: $body"
+            exit 1
+          fi
+
+      - name: Cleanup SSH keys
+        if: always()
+        run: |
+          echo "🧹 Cleaning up SSH keys..."
+          rm -f ~/.ssh/deploy_key
+          echo "✅ Cleanup complete"
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 Deployment completed successfully!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📍 Target: ${{ secrets.VM_HOST }}"
+          echo "📂 Directory: ${{ secrets.VM_DEST_DIR }}"
+          echo "🔧 Service: ${{ secrets.VM_SERVICE }}"
+          echo "🌐 MCP URL: ${{ secrets.VM_MCP_URL }}"
+          echo "💚 Health URL: ${{ secrets.VM_HEALTH_URL }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Deployment failure notice
+        if: failure()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "❌ Deployment failed!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Please check the logs above for details."
+          echo "You may need to manually investigate the VM."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          exit 1
