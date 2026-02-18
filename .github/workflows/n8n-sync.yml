@@ -37,118 +37,339 @@ jobs:
             echo "Workflow Name: ${{ inputs.workflow_name }}"
           fi
           echo "N8N Base URL: ${{ secrets.N8NBASEURL }}"
-          echo "=========================="
+          echo "========================="
+
+      - name: Validate secrets
+        env:
+          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+          N8N_BASE_URL: ${{ secrets.N8NBASEURL }}
+        run: |
+          echo "🔐 Validating secrets..."
+          
+          if [ -z "$N8N_BASE_URL" ]; then
+            echo "❌ ERROR: N8NBASEURL secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$N8N_API_KEY" ]; then
+            echo "❌ ERROR: N8NAPIKEY secret is not set"
+            exit 1
+          fi
+          
+          # Remove trailing slash from base URL if present
+          N8N_BASE_URL="${N8N_BASE_URL%/}"
+          echo "N8N_BASE_URL=$N8N_BASE_URL" >> $GITHUB_ENV
+          
+          echo "✅ Secrets validated"
+
+      - name: Test n8n API connection
+        env:
+          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+        run: |
+          echo "🔌 Testing n8n API connection..."
+          
+          HTTP_STATUS=$(curl -s -o /tmp/api_test.json -w "%{http_code}" \
+            -H "X-N8N-API-KEY: $N8N_API_KEY" \
+            -H "Accept: application/json" \
+            "$N8N_BASE_URL/rest/workflows")
+          
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "✅ Successfully connected to n8n API"
+            WORKFLOW_COUNT=$(jq '. | length' /tmp/api_test.json 2>/dev/null || echo "0")
+            echo "📊 Found $WORKFLOW_COUNT workflows in n8n"
+          elif [ "$HTTP_STATUS" -eq 401 ]; then
+            echo "❌ ERROR: Authentication failed (401)"
+            echo "Please check that N8NAPIKEY is correct"
+            exit 1
+          elif [ "$HTTP_STATUS" -eq 404 ]; then
+            echo "❌ ERROR: API endpoint not found (404)"
+            echo "Please check that N8NBASEURL is correct"
+            exit 1
+          else
+            echo "❌ ERROR: API request failed with status $HTTP_STATUS"
+            cat /tmp/api_test.json
+            exit 1
+          fi
 
       - name: Create workflows directory
         run: |
           mkdir -p workflows
           echo "📁 Created/verified workflows directory"
 
+      - name: Pull workflow(s) from N8N
+        if: inputs.sync_direction == 'pull'
+        env:
+          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+          WORKFLOW_NAME: ${{ inputs.workflow_name }}
+        run: |
+          echo "📥 Starting pull operation..."
+          
+          if [ -z "$WORKFLOW_NAME" ]; then
+            echo "🔄 Pulling ALL workflows from n8n..."
+            
+            # Get list of all workflows from n8n API
+            HTTP_STATUS=$(curl -s -o /tmp/workflows_list.json -w "%{http_code}" \
+              -H "X-N8N-API-KEY: $N8N_API_KEY" \
+              -H "Accept: application/json" \
+              "$N8N_BASE_URL/rest/workflows")
+            
+            if [ "$HTTP_STATUS" -ne 200 ]; then
+              echo "❌ ERROR: Failed to fetch workflow list (HTTP $HTTP_STATUS)"
+              cat /tmp/workflows_list.json
+              exit 1
+            fi
+            
+            # Parse workflow IDs and names
+            WORKFLOW_COUNT=$(jq '. | length' /tmp/workflows_list.json)
+            echo "📊 Found $WORKFLOW_COUNT workflows"
+            
+            if [ "$WORKFLOW_COUNT" -eq 0 ]; then
+              echo "⚠️  No workflows found in n8n"
+              exit 0
+            fi
+            
+            # Process each workflow
+            SUCCESS_COUNT=0
+            ERROR_COUNT=0
+            
+            jq -c '.[]' /tmp/workflows_list.json | while read -r workflow_summary; do
+              WORKFLOW_ID=$(echo "$workflow_summary" | jq -r '.id')
+              WORKFLOW_DISPLAY_NAME=$(echo "$workflow_summary" | jq -r '.name')
+              
+              echo ""
+              echo "  📋 Processing workflow: $WORKFLOW_DISPLAY_NAME (ID: $WORKFLOW_ID)"
+              
+              # Fetch full workflow data
+              HTTP_STATUS=$(curl -s -o "/tmp/workflow_${WORKFLOW_ID}.json" -w "%{http_code}" \
+                -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                -H "Accept: application/json" \
+                "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+              
+              if [ "$HTTP_STATUS" -eq 200 ]; then
+                # Create safe filename from workflow name (replace spaces and special chars)
+                SAFE_NAME=$(echo "$WORKFLOW_DISPLAY_NAME" | tr ' ' '_' | tr -cd '[:alnum:]_-')
+                FILENAME="workflows/${SAFE_NAME}_${WORKFLOW_ID}.json"
+                
+                # Save workflow to file with proper formatting
+                jq '.' "/tmp/workflow_${WORKFLOW_ID}.json" > "$FILENAME"
+                
+                echo "  ✅ Saved: $FILENAME"
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "  ❌ Failed to fetch workflow (HTTP $HTTP_STATUS)"
+                ERROR_COUNT=$((ERROR_COUNT + 1))
+              fi
+            done
+            
+            # Wait for background processes
+            wait
+            
+            echo ""
+            echo "📊 Pull Summary:"
+            echo "  ✅ Successful: $SUCCESS_COUNT"
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo "  ❌ Failed: $ERROR_COUNT"
+            fi
+            
+          else
+            echo "🔄 Pulling specific workflow '$WORKFLOW_NAME'..."
+            
+            # First, get the list of all workflows to find the ID
+            HTTP_STATUS=$(curl -s -o /tmp/workflows_list.json -w "%{http_code}" \
+              -H "X-N8N-API-KEY: $N8N_API_KEY" \
+              -H "Accept: application/json" \
+              "$N8N_BASE_URL/rest/workflows")
+            
+            if [ "$HTTP_STATUS" -ne 200 ]; then
+              echo "❌ ERROR: Failed to fetch workflow list (HTTP $HTTP_STATUS)"
+              exit 1
+            fi
+            
+            # Find workflow by name (case-insensitive search)
+            WORKFLOW_ID=$(jq -r --arg name "$WORKFLOW_NAME" \
+              '.[] | select(.name | ascii_downcase == ($name | ascii_downcase)) | .id' \
+              /tmp/workflows_list.json | head -1)
+            
+            if [ -z "$WORKFLOW_ID" ] || [ "$WORKFLOW_ID" = "null" ]; then
+              echo "❌ ERROR: Workflow '$WORKFLOW_NAME' not found in n8n"
+              echo ""
+              echo "Available workflows:"
+              jq -r '.[].name' /tmp/workflows_list.json | sed 's/^/  - /'
+              exit 1
+            fi
+            
+            echo "✓ Found workflow ID: $WORKFLOW_ID"
+            
+            # Fetch full workflow data
+            HTTP_STATUS=$(curl -s -o /tmp/workflow_single.json -w "%{http_code}" \
+              -H "X-N8N-API-KEY: $N8N_API_KEY" \
+              -H "Accept: application/json" \
+              "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+            
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              # Create safe filename
+              SAFE_NAME=$(echo "$WORKFLOW_NAME" | tr ' ' '_' | tr -cd '[:alnum:]_-')
+              FILENAME="workflows/${SAFE_NAME}_${WORKFLOW_ID}.json"
+              
+              # Save workflow to file with proper formatting
+              jq '.' /tmp/workflow_single.json > "$FILENAME"
+              
+              echo "✅ Successfully pulled workflow to: $FILENAME"
+            else
+              echo "❌ ERROR: Failed to fetch workflow (HTTP $HTTP_STATUS)"
+              cat /tmp/workflow_single.json
+              exit 1
+            fi
+          fi
+
       - name: Push workflow(s) to N8N
         if: inputs.sync_direction == 'push'
         env:
           N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
-          N8N_BASE_URL: ${{ secrets.N8NBASEURL }}
           WORKFLOW_NAME: ${{ inputs.workflow_name }}
         run: |
           echo "📤 Starting push operation..."
           
           if [ -z "$WORKFLOW_NAME" ]; then
-            echo "🔄 Pushing ALL workflows to N8N..."
+            echo "🔄 Pushing ALL workflows to n8n..."
+            
             WORKFLOW_COUNT=0
+            SUCCESS_COUNT=0
+            ERROR_COUNT=0
+            
             for workflow_file in workflows/*.json; do
               if [ -f "$workflow_file" ]; then
                 workflow_basename=$(basename "$workflow_file" .json)
+                echo ""
                 echo "  📋 Processing: $workflow_basename"
                 
-                # Actual N8N API call (uncomment when ready)
-                # curl -X POST "$N8N_BASE_URL/api/v1/workflows" \
-                #   -H "X-N8N-API-KEY: $N8N_API_KEY" \
-                #   -H "Content-Type: application/json" \
-                #   -d @"$workflow_file" \
-                #   --fail --silent --show-error
+                # Extract workflow ID from filename (format: name_ID.json)
+                WORKFLOW_ID=$(echo "$workflow_basename" | grep -oE '[0-9]+$')
                 
-                echo "  ✅ Pushed: $workflow_basename"
+                if [ -z "$WORKFLOW_ID" ]; then
+                  echo "  ⚠️  Warning: Could not extract workflow ID from filename, skipping"
+                  continue
+                fi
+                
+                # Check if workflow exists in n8n
+                HTTP_STATUS=$(curl -s -o /tmp/check_response.json -w "%{http_code}" \
+                  -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                  -H "Accept: application/json" \
+                  "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  # Workflow exists, update it
+                  HTTP_STATUS=$(curl -s -o /tmp/push_response.json -w "%{http_code}" \
+                    -X PUT \
+                    -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                    -H "Content-Type: application/json" \
+                    -d @"$workflow_file" \
+                    "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+                  
+                  if [ "$HTTP_STATUS" -eq 200 ]; then
+                    echo "  ✅ Updated: $workflow_basename"
+                    SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+                  else
+                    echo "  ❌ Failed to update (HTTP $HTTP_STATUS)"
+                    cat /tmp/push_response.json
+                    ERROR_COUNT=$((ERROR_COUNT + 1))
+                  fi
+                else
+                  # Workflow doesn't exist, create it
+                  HTTP_STATUS=$(curl -s -o /tmp/push_response.json -w "%{http_code}" \
+                    -X POST \
+                    -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                    -H "Content-Type: application/json" \
+                    -d @"$workflow_file" \
+                    "$N8N_BASE_URL/rest/workflows")
+                  
+                  if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+                    echo "  ✅ Created: $workflow_basename"
+                    SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+                  else
+                    echo "  ❌ Failed to create (HTTP $HTTP_STATUS)"
+                    cat /tmp/push_response.json
+                    ERROR_COUNT=$((ERROR_COUNT + 1))
+                  fi
+                fi
+                
                 WORKFLOW_COUNT=$((WORKFLOW_COUNT + 1))
               fi
             done
-            echo "📊 Total workflows pushed: $WORKFLOW_COUNT"
-          else
-            echo "🔄 Pushing specific workflow '$WORKFLOW_NAME' to N8N..."
             
-            if [ ! -f "workflows/$WORKFLOW_NAME.json" ]; then
-              echo "❌ ERROR: Workflow file 'workflows/$WORKFLOW_NAME.json' not found"
+            echo ""
+            echo "📊 Push Summary:"
+            echo "  📁 Total processed: $WORKFLOW_COUNT"
+            echo "  ✅ Successful: $SUCCESS_COUNT"
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo "  ❌ Failed: $ERROR_COUNT"
               exit 1
             fi
             
-            # Actual N8N API call (uncomment when ready)
-            # curl -X POST "$N8N_BASE_URL/api/v1/workflows" \
-            #   -H "X-N8N-API-KEY: $N8N_API_KEY" \
-            #   -H "Content-Type: application/json" \
-            #   -d @"workflows/$WORKFLOW_NAME.json" \
-            #   --fail --silent --show-error
-            
-            echo "✅ Successfully pushed workflow '$WORKFLOW_NAME' to N8N"
-          fi
-
-      - name: Pull workflow(s) from N8N
-        if: inputs.sync_direction == 'pull'
-        env:
-          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
-          N8N_BASE_URL: ${{ secrets.N8NBASEURL }}
-          WORKFLOW_NAME: ${{ inputs.workflow_name }}
-        run: |
-          echo "📥 Starting pull operation..."
-          
-          # Store initial git status for change detection
-          git status --porcelain > /tmp/git_status_before.txt
-          
-          if [ -z "$WORKFLOW_NAME" ]; then
-            echo "🔄 Pulling ALL workflows from N8N..."
-            
-            # Get list of all workflows from N8N API
-            # curl -X GET "$N8N_BASE_URL/api/v1/workflows" \
-            #   -H "X-N8N-API-KEY: $N8N_API_KEY" \
-            #   -H "Content-Type: application/json" \
-            #   --fail --silent --show-error \
-            #   | jq -r '.data[].name' > /tmp/workflow_list.txt
-            
-            # For demo purposes, create a sample workflow list
-            echo "workflow1" > /tmp/workflow_list.txt
-            echo "workflow2" >> /tmp/workflow_list.txt
-            
-            WORKFLOW_COUNT=0
-            while IFS= read -r workflow_name; do
-              if [ -n "$workflow_name" ]; then
-                echo "  📋 Processing: $workflow_name"
-                
-                # Pull individual workflow
-                # curl -X GET "$N8N_BASE_URL/api/v1/workflows/$workflow_name" \
-                #   -H "X-N8N-API-KEY: $N8N_API_KEY" \
-                #   -o "workflows/$workflow_name.json" \
-                #   --fail --silent --show-error
-                
-                # For demo purposes, create sample files
-                echo "{\"name\":\"$workflow_name\",\"demo\":true}" > "workflows/$workflow_name.json"
-                
-                echo "  ✅ Pulled: $workflow_name"
-                WORKFLOW_COUNT=$((WORKFLOW_COUNT + 1))
-              fi
-            done < /tmp/workflow_list.txt
-            echo "📊 Total workflows pulled: $WORKFLOW_COUNT"
           else
-            echo "🔄 Pulling specific workflow '$WORKFLOW_NAME' from N8N..."
+            echo "🔄 Pushing specific workflow '$WORKFLOW_NAME' to n8n..."
             
-            # Pull specific workflow
-            # curl -X GET "$N8N_BASE_URL/api/v1/workflows/$WORKFLOW_NAME" \
-            #   -H "X-N8N-API-KEY: $N8N_API_KEY" \
-            #   -o "workflows/$WORKFLOW_NAME.json" \
-            #   --fail --silent --show-error
+            # Find the workflow file
+            WORKFLOW_FILE=$(find workflows -name "*${WORKFLOW_NAME}*.json" | head -1)
             
-            # For demo purposes, create sample file
-            echo "{\"name\":\"$WORKFLOW_NAME\",\"demo\":true}" > "workflows/$WORKFLOW_NAME.json"
+            if [ -z "$WORKFLOW_FILE" ]; then
+              echo "❌ ERROR: Workflow file matching '$WORKFLOW_NAME' not found in workflows/"
+              echo ""
+              echo "Available workflow files:"
+              ls -1 workflows/*.json 2>/dev/null | sed 's/^/  - /' || echo "  (none)"
+              exit 1
+            fi
             
-            echo "✅ Successfully pulled workflow '$WORKFLOW_NAME' from N8N"
+            echo "✓ Found file: $WORKFLOW_FILE"
+            
+            # Extract workflow ID from filename
+            workflow_basename=$(basename "$WORKFLOW_FILE" .json)
+            WORKFLOW_ID=$(echo "$workflow_basename" | grep -oE '[0-9]+$')
+            
+            if [ -z "$WORKFLOW_ID" ]; then
+              echo "❌ ERROR: Could not extract workflow ID from filename"
+              exit 1
+            fi
+            
+            # Check if workflow exists
+            HTTP_STATUS=$(curl -s -o /tmp/check_response.json -w "%{http_code}" \
+              -H "X-N8N-API-KEY: $N8N_API_KEY" \
+              -H "Accept: application/json" \
+              "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+            
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              # Update existing workflow
+              HTTP_STATUS=$(curl -s -o /tmp/push_response.json -w "%{http_code}" \
+                -X PUT \
+                -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                -H "Content-Type: application/json" \
+                -d @"$WORKFLOW_FILE" \
+                "$N8N_BASE_URL/rest/workflows/$WORKFLOW_ID")
+              
+              if [ "$HTTP_STATUS" -eq 200 ]; then
+                echo "✅ Successfully updated workflow in n8n"
+              else
+                echo "❌ ERROR: Failed to update workflow (HTTP $HTTP_STATUS)"
+                cat /tmp/push_response.json
+                exit 1
+              fi
+            else
+              # Create new workflow
+              HTTP_STATUS=$(curl -s -o /tmp/push_response.json -w "%{http_code}" \
+                -X POST \
+                -H "X-N8N-API-KEY: $N8N_API_KEY" \
+                -H "Content-Type: application/json" \
+                -d @"$WORKFLOW_FILE" \
+                "$N8N_BASE_URL/rest/workflows")
+              
+              if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+                echo "✅ Successfully created workflow in n8n"
+              else
+                echo "❌ ERROR: Failed to create workflow (HTTP $HTTP_STATUS)"
+                cat /tmp/push_response.json
+                exit 1
+              fi
+            fi
           fi
 
       - name: Detect and display changes
@@ -163,35 +384,31 @@ jobs:
           
           if git diff --cached --quiet; then
             echo "📋 No changes detected - all workflows are up to date"
+            echo "NO_CHANGES=true" >> $GITHUB_ENV
           else
             echo "📊 Changes detected in workflows:"
             echo ""
             
             # Show file-level changes
             echo "📁 Files changed:"
-            git diff --cached --name-only | while read file; do
-              if git diff --cached --quiet HEAD -- "$file" 2>/dev/null; then
-                echo "  📄 Modified: $file"
-              else
-                if [ ! -f "$file" ]; then
-                  echo "  ❌ Deleted: $file"
-                else
-                  echo "  ✨ Added: $file"
-                fi
-              fi
+            git diff --cached --name-status | while read status file; do
+              case "$status" in
+                A) echo "  ✨ Added: $file" ;;
+                M) echo "  📝 Modified: $file" ;;
+                D) echo "  ❌ Deleted: $file" ;;
+                *) echo "  📄 $status: $file" ;;
+              esac
             done
             
             echo ""
             echo "📈 Detailed changes:"
             git diff --cached --stat
             
-            echo ""
-            echo "📝 Line-by-line changes:"
-            git diff --cached
+            echo "NO_CHANGES=false" >> $GITHUB_ENV
           fi
 
       - name: Commit and push changes
-        if: inputs.sync_direction == 'pull'
+        if: inputs.sync_direction == 'pull' && env.NO_CHANGES != 'true'
         run: |
           echo ""
           echo "💾 Committing changes..."
@@ -199,17 +416,14 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          if git diff --cached --quiet; then
-            echo "📋 No changes to commit"
+          if [ -z "${{ inputs.workflow_name }}" ]; then
+            git commit -m "sync: Update all n8n workflows from n8n instance"
           else
-            if [ -z "${{ inputs.workflow_name }}" ]; then
-              git commit -m "sync: Update all N8N workflows"
-            else
-              git commit -m "sync: Update N8N workflow '${{ inputs.workflow_name }}'"
-            fi
-            git push
-            echo "✅ Changes committed and pushed to repository"
+            git commit -m "sync: Update n8n workflow '${{ inputs.workflow_name }}' from n8n instance"
           fi
+          
+          git push
+          echo "✅ Changes committed and pushed to repository"
 
       - name: Sync summary
         run: |
@@ -226,7 +440,7 @@ jobs:
           echo "Status:    ✅ Success"
           
           if [ "${{ inputs.sync_direction }}" == "pull" ]; then
-            if git diff HEAD~1 --quiet 2>/dev/null || [ "$(git rev-list --count HEAD)" == "1" ]; then
+            if [ "$NO_CHANGES" == "true" ]; then
               echo "Changes:   📋 No updates needed"
             else
               echo "Changes:   📊 Repository updated"
