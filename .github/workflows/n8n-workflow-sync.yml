@@ -372,6 +372,10 @@ jobs:
           WORKFLOW_NAME="${{ github.event.inputs.workflow_name }}"
           WORKFLOW_ID="${{ steps.get_workflow_id.outputs.workflow_id }}"
           
+          # Get the current branch name
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $CURRENT_BRANCH"
+          
           git add "$OUTPUT_FILE"
           
           # Check if there are changes to commit
@@ -381,24 +385,25 @@ jobs:
             exit 0
           fi
           
-          # Create commit
-          COMMIT_MSG="Sync n8n workflow: $WORKFLOW_NAME (ID: $WORKFLOW_ID)
+          # Create commit message
+          TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          COMMIT_MSG="Sync n8n workflow: ${WORKFLOW_NAME} (ID: ${WORKFLOW_ID})
 
 Automatically synced from n8n instance
 Triggered by: ${{ github.actor }}
-Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+Timestamp: ${TIMESTAMP}"
           
           git commit -m "$COMMIT_MSG"
           
-          # Push changes
-          if git push origin main; then
-            echo "✅ Changes pushed successfully"
+          # Push changes to the current branch
+          if git push origin "$CURRENT_BRANCH"; then
+            echo "✅ Changes pushed successfully to $CURRENT_BRANCH"
             COMMIT_SHA=$(git rev-parse HEAD)
             echo "Commit SHA: $COMMIT_SHA"
             echo "status=success" >> $GITHUB_OUTPUT
             echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
           else
-            echo "❌ ERROR: Failed to push changes"
+            echo "❌ ERROR: Failed to push changes to $CURRENT_BRANCH"
             echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
