@@ -53,17 +53,17 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "VM_USER is set: ${{ secrets.VM_USER != '' }}"
           echo "VM_HOST is set: ${{ secrets.VM_HOST != '' }}"
-          echo "VM_DEST_DIR is set: ${{ secrets.VM_DEST_DIR != '' }}"
+          echo "VMDEST_DIR is set: ${{ secrets.VMDEST_DIR != '' }}"
           echo ""
           echo "VM_USER length: $(echo -n '${{ secrets.VM_USER }}' | wc -c) characters"
           echo "VM_HOST length: $(echo -n '${{ secrets.VM_HOST }}' | wc -c) characters"
-          echo "VM_DEST_DIR length: $(echo -n '${{ secrets.VM_DEST_DIR }}' | wc -c) characters"
+          echo "VMDEST_DIR length: $(echo -n '${{ secrets.VMDEST_DIR }}' | wc -c) characters"
           echo ""
           echo "Full rsync target path will be:"
-          echo "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VM_DEST_DIR }}/"
+          echo "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VMDEST_DIR }}/"
           echo ""
-          echo "VM_DEST_DIR starts with: $(echo '${{ secrets.VM_DEST_DIR }}' | cut -c1-10)..."
-          echo "VM_DEST_DIR ends with: ...$(echo '${{ secrets.VM_DEST_DIR }}' | tail -c 10)"
+          echo "VMDEST_DIR starts with: $(echo '${{ secrets.VMDEST_DIR }}' | cut -c1-10)..."
+          echo "VMDEST_DIR ends with: ...$(echo '${{ secrets.VMDEST_DIR }}' | tail -c 10)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Verify remote directory
@@ -75,19 +75,19 @@ jobs:
             ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
             "echo 'Current user: \$(whoami)'; \
              echo 'Home directory: \$HOME'; \
-             echo 'Target directory: ${{ secrets.VM_DEST_DIR }}'; \
+             echo 'Target directory: ${{ secrets.VMDEST_DIR }}'; \
              echo ''; \
              echo 'Checking if directory exists:'; \
-             if [ -d '${{ secrets.VM_DEST_DIR }}' ]; then \
+             if [ -d '${{ secrets.VMDEST_DIR }}' ]; then \
                echo '✅ Directory exists'; \
-               ls -la '${{ secrets.VM_DEST_DIR }}' | head -n 10; \
+               ls -la '${{ secrets.VMDEST_DIR }}' | head -n 10; \
                echo ''; \
                echo 'Directory permissions:'; \
-               stat -c '%A %U:%G' '${{ secrets.VM_DEST_DIR }}'; \
+               stat -c '%A %U:%G' '${{ secrets.VMDEST_DIR }}'; \
              else \
                echo '❌ Directory does NOT exist'; \
                echo 'Attempting to create it...'; \
-               mkdir -p '${{ secrets.VM_DEST_DIR }}' && echo '✅ Directory created' || echo '❌ Failed to create directory'; \
+               mkdir -p '${{ secrets.VMDEST_DIR }}' && echo '✅ Directory created' || echo '❌ Failed to create directory'; \
              fi"
 
       - name: Sync code to VM
@@ -97,7 +97,7 @@ jobs:
           echo "📦 Starting rsync deployment..."
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Source: vm_server/"
-          echo "Target: ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VM_DEST_DIR }}/"
+          echo "Target: ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VMDEST_DIR }}/"
           echo ""
           
           rsync -avvz --progress \
@@ -110,7 +110,7 @@ jobs:
             --exclude='memory/' \
             --exclude='.git/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            vm_server/ ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VM_DEST_DIR }}/
+            vm_server/ ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:${{ secrets.VMDEST_DIR }}/
           
           rsync_exit_code=$?
           echo ""
@@ -130,10 +130,10 @@ jobs:
           
           ssh -i ~/.ssh/deploy_key \
             ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
-            "if [ -f '${{ secrets.VM_DEST_DIR }}/requirements.txt' ]; then \
+            "if [ -f '${{ secrets.VMDEST_DIR }}/requirements.txt' ]; then \
               echo 'Found requirements.txt, installing dependencies...'; \
               ${{ secrets.VM_VENV_PY }} -m pip install --upgrade pip && \
-              ${{ secrets.VM_VENV_PY }} -m pip install -r '${{ secrets.VM_DEST_DIR }}/requirements.txt'; \
+              ${{ secrets.VM_VENV_PY }} -m pip install -r '${{ secrets.VMDEST_DIR }}/requirements.txt'; \
               echo '✅ Dependencies installed'; \
             else \
               echo '⚠️  No requirements.txt found, skipping dependency installation'; \
@@ -237,7 +237,7 @@ jobs:
           echo "🎉 Deployment completed successfully!"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📍 Target: ${{ secrets.VM_HOST }}"
-          echo "📂 Directory: ${{ secrets.VM_DEST_DIR }}"
+          echo "📂 Directory: ${{ secrets.VMDEST_DIR }}"
           echo "🔧 Service: ${{ secrets.VM_SERVICE }}"
           echo "🌐 MCP URL: ${{ secrets.VM_MCP_URL }}"
           echo "💚 Health URL: ${{ secrets.VM_HEALTH_URL }}"
