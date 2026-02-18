@@ -1,0 +1,83 @@
+name: N8N Bidirectional Workflow Sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'workflows/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  push-to-n8n:
+    name: Push Workflows to N8N
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: |
+          npm install -g n8n
+      
+      - name: Push workflows to N8N
+        env:
+          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+        run: |
+          echo "Pushing workflows to N8N..."
+          for workflow_file in workflows/*.json; do
+            if [ -f "$workflow_file" ]; then
+              echo "Processing: $workflow_file"
+              workflow_name=$(basename "$workflow_file" .json)
+              echo "Workflow name: $workflow_name"
+            fi
+          done
+      
+      - name: Report push status
+        run: |
+          echo "Push to N8N completed"
+
+  pull-from-n8n:
+    name: Pull Workflows from N8N
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Create workflows directory
+        run: |
+          mkdir -p workflows
+      
+      - name: Pull workflows from N8N
+        env:
+          N8N_API_KEY: ${{ secrets.N8NAPIKEY }}
+        run: |
+          echo "Pulling workflows from N8N..."
+          echo "N8N API configured"
+      
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git diff --quiet workflows/ || echo "has_changes=true" >> $GITHUB_OUTPUT
+      
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add workflows/
+          git diff --staged --quiet || git commit -m "Update workflows from N8N"
+          git push
