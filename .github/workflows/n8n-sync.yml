@@ -417,26 +417,30 @@ jobs:
             ACTIVE_STATE=$(cat "$workflow_file" | jq -r '.active // false' 2>/dev/null)
             echo "  🔄 Active state: $ACTIVE_STATE"
             
-            # Strip extra properties that n8n API doesn't accept
-            # CRITICAL FIX: Remove 'active' from the cleaned data - it's read-only in the API
-            echo "  🧹 Cleaning workflow data..."
+            # Strip ALL read-only properties that n8n API doesn't accept
+            # CRITICAL FIX: Remove ALL read-only properties:
+            # - 'active' (managed via separate activate/deactivate endpoints)
+            # - 'tags' (read-only, managed separately in n8n)
+            # - 'id' (assigned by n8n)
+            # - 'createdAt', 'updatedAt' (managed by n8n)
+            # - 'versionId' (managed by n8n)
+            echo "  🧹 Cleaning workflow data (removing read-only properties)..."
             cat "$workflow_file" | jq '{
               name: .name,
               nodes: .nodes,
               connections: .connections,
               settings: .settings,
               staticData: .staticData,
-              tags: .tags,
               description: .description
             } | del(..|nulls)' > workflow_clean.json
             
             if [ "$DEBUG_MODE" == "true" ]; then
               echo "  Original workflow properties:"
               cat "$workflow_file" | jq 'keys' 2>/dev/null
-              echo "  Cleaned workflow properties:"
+              echo "  Cleaned workflow properties (sent to API):"
               cat workflow_clean.json | jq 'keys' 2>/dev/null
               echo "  Cleaned workflow size: $(wc -c < workflow_clean.json) bytes"
-              echo "  Note: 'active' property removed (it's read-only in the API)"
+              echo "  ℹ️  Removed read-only properties: active, tags, id, createdAt, updatedAt, versionId"
             fi
             
             # Check if workflow exists in n8n (trim spaces for comparison)
