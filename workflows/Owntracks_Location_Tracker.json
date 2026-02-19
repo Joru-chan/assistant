@@ -1,7 +1,11 @@
 {
-  "name": "Enhanced Owntracks Location Tracker",
-  "description": "Advanced Owntracks workflow with distance filtering, rate limiting, and multi-type support",
+  "updatedAt": "2026-02-19T11:00:07.373Z",
+  "createdAt": "2026-02-18T19:31:58.189Z",
+  "id": "lOVfBNjOpIc3hZxZ",
+  "name": "Owntracks Location Tracker",
+  "description": null,
   "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -14,26 +18,32 @@
       "id": "webhook-owntracks",
       "name": "Webhook - Owntracks",
       "type": "n8n-nodes-base.webhook",
-      "position": [256, 304]
+      "typeVersion": 1,
+      "position": [
+        256,
+        304
+      ],
+      "webhookId": "owntracks-location"
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
         "jsCode": "// Simple Owntracks data validator and transformer\n// This just verifies the basics and passes the data through\nconst item = $input.first();\n\ntry {\n  // Get the body from webhook input\n  const inputData = item.body || item;\n  \n  // Basic validation - does it have coordinates?\n  const hasValidCoordinates = \n    inputData.lat !== undefined && \n    inputData.lon !== undefined;\n\n  if (hasValidCoordinates) {\n    // Create a simple output\n    return [{\n      json: {\n        source: 'owntracks',\n        type: inputData._type || 'location',\n        coordinates: {\n          latitude: inputData.lat,\n          longitude: inputData.lon,\n          accuracy: inputData.acc || 0\n        },\n        device: {\n          battery: inputData.batt || 0,\n          trigger: inputData.t || '',\n          timestamp: inputData.tst || 0\n        },\n        raw: inputData,\n        valid: true,\n        skip: false\n      }\n    }];\n  } else {\n    // Log invalid data but still return something\n    console.log('Invalid data received:', JSON.stringify(inputData));\n    return [{\n      json: {\n        valid: false,\n        skip: true,\n        raw: inputData,\n        reason: 'Missing coordinates'\n      }\n    }];\n  }\n} catch (error) {\n  // Handle any errors\n  console.error('Error processing Owntracks data:', error);\n  return [{\n    json: {\n      valid: false,\n      skip: true,\n      error: error.message\n    }\n  }];\n}"
       },
-      "id": "enhanced-filter",
+      "id": "filter-location",
       "name": "Filter Location Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [464, 304]
+      "position": [
+        464,
+        304
+      ]
     },
     {
       "parameters": {
         "conditions": {
           "boolean": [
             {
-              "value1": "={{ $json.skip }}",
-              "value2": false
+              "value1": "={{ $json.skip }}"
             }
           ]
         }
@@ -42,22 +52,29 @@
       "name": "Should Send?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [656, 304]
+      "position": [
+        656,
+        304
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://poke.com/api/v1/inbound-sms/webhook",
+        "url": "={{ $env.POKE_API_URL || 'http://localhost:8000/api/location' }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBearerAuth",
-        "sendBody": true,
-        "bodyParameters": {
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
           "parameters": [
             {
-              "name": "body",
-              "value": "={{ $json.poke_payload }}"
+              "name": "Content-Type",
+              "value": "application/json"
             }
           ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
         },
         "options": {
           "response": {
@@ -65,52 +82,65 @@
               "fullResponse": true
             }
           },
-          "timeout": 10000,
-          "retry": {
-            "enabled": true,
-            "maxAttempts": 3,
-            "waitBetween": 1000
-          }
+          "timeout": 10000
         }
       },
       "id": "send-to-poke",
       "name": "Send to Poke",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [864, 208]
+      "position": [
+        864,
+        208
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "poke-api-key",
+          "name": "Poke API Key"
+        }
+      }
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item.json;\nconst response = item.body || item;\n\nconsole.log('✅ Successfully sent to Poke');\nconsole.log('Response:', JSON.stringify(response, null, 2));\n\nreturn {\n  json: {\n    success: true,\n    status: item.statusCode || 200,\n    message: 'Update sent to Poke',\n    timestamp: new Date().toISOString(),\n    stats: response.workflow_stats || null\n  }\n};"
+        "jsCode": "// Success handler\\nconst item = $input.item.json;\\n\\nconsole.log('✅ Successfully sent to Poke');\\nconsole.log('Response:', JSON.stringify(item, null, 2));\\n\\nreturn {\\n  json: {\\n    success: true,\\n    status: item.statusCode || 200,\\n    message: 'Location update sent to Poke',\\n    timestamp: new Date().toISOString()\\n  }\\n};"
       },
       "id": "log-success",
       "name": "Log Success",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1056, 208]
+      "position": [
+        1056,
+        208
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item.json;\n\nconsole.log('⏭️ Update skipped');\nconsole.log('Reason:', item.reason || 'No reason provided');\nconsole.log('Received data:', JSON.stringify(item.received_data || item.original_data, null, 2));\n\nreturn {\n  json: {\n    skipped: true,\n    reason: item.reason,\n    timestamp: new Date().toISOString()\n  }\n};"
+        "jsCode": "// Skipped handler\\nconst item = $input.item.json;\\n\\nconsole.log('⏭️  Location update skipped');\\nconsole.log('Reason:', item.reason || 'No reason provided');\\n\\nreturn {\\n  json: {\\n    skipped: true,\\n    reason: item.reason,\\n    timestamp: new Date().toISOString()\\n  }\\n};"
       },
       "id": "log-skipped",
       "name": "Log Skipped",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [864, 400]
+      "position": [
+        864,
+        400
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const error = $input.item.json;\n\nconsole.error('❌ Error processing update');\nconsole.error('Error:', JSON.stringify(error, null, 2));\n\n// Extract meaningful error information\nconst errorMessage = error.message || \n  error.error?.message ||\n  (error.cause && JSON.stringify(error.cause)) ||\n  'Unknown error';\n\nreturn {\n  json: {\n    error: true,\n    message: errorMessage,\n    details: error,\n    timestamp: new Date().toISOString(),\n    // Add context for debugging\n    context: {\n      statusCode: error.statusCode,\n      url: error.config?.url,\n      method: error.config?.method\n    }\n  }\n};"
+        "jsCode": "// Error handler\\nconst error = $input.item.json;\\n\\nconsole.error('❌ Error processing location update');\\nconsole.error('Error:', JSON.stringify(error, null, 2));\\n\\n// Return error details\\nreturn {\\n  json: {\\n    error: true,\\n    message: error.message || 'Unknown error',\\n    details: error,\\n    timestamp: new Date().toISOString()\\n  }\\n};"
       },
       "id": "handle-error",
       "name": "Handle Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1056, 304]
+      "position": [
+        1056,
+        304
+      ]
     }
   ],
   "connections": {
@@ -163,22 +193,251 @@
             "index": 0
           }
         ]
-      ],
-      "error": [
-        [
-          {
-            "node": "Handle Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
       ]
     }
   },
   "settings": {
     "executionOrder": "v1",
     "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner"
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
-  "staticData": {}
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "33a4df28-185f-45fb-8ff9-ff2c8f8f45c0",
+  "activeVersionId": "33a4df28-185f-45fb-8ff9-ff2c8f8f45c0",
+  "versionCounter": 30,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-18T19:31:58.200Z",
+      "createdAt": "2026-02-18T19:31:58.200Z",
+      "role": "workflow:owner",
+      "workflowId": "lOVfBNjOpIc3hZxZ",
+      "projectId": "TilHgTxHPA8tqHO1",
+      "project": {
+        "updatedAt": "2025-11-18T19:41:27.899Z",
+        "createdAt": "2025-11-07T20:39:42.351Z",
+        "id": "TilHgTxHPA8tqHO1",
+        "name": "Lina F <jordane.frechet@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "319eaa7a-83a0-4f1d-ba6e-595ef2af39b3"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-19T11:00:19.000Z",
+    "createdAt": "2026-02-19T11:00:07.376Z",
+    "versionId": "33a4df28-185f-45fb-8ff9-ff2c8f8f45c0",
+    "workflowId": "lOVfBNjOpIc3hZxZ",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "owntracks",
+          "options": {
+            "rawBody": false
+          }
+        },
+        "id": "webhook-owntracks",
+        "name": "Webhook - Owntracks",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1,
+        "position": [
+          256,
+          304
+        ],
+        "webhookId": "owntracks-location"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Simple Owntracks data validator and transformer\n// This just verifies the basics and passes the data through\nconst item = $input.first();\n\ntry {\n  // Get the body from webhook input\n  const inputData = item.body || item;\n  \n  // Basic validation - does it have coordinates?\n  const hasValidCoordinates = \n    inputData.lat !== undefined && \n    inputData.lon !== undefined;\n\n  if (hasValidCoordinates) {\n    // Create a simple output\n    return [{\n      json: {\n        source: 'owntracks',\n        type: inputData._type || 'location',\n        coordinates: {\n          latitude: inputData.lat,\n          longitude: inputData.lon,\n          accuracy: inputData.acc || 0\n        },\n        device: {\n          battery: inputData.batt || 0,\n          trigger: inputData.t || '',\n          timestamp: inputData.tst || 0\n        },\n        raw: inputData,\n        valid: true,\n        skip: false\n      }\n    }];\n  } else {\n    // Log invalid data but still return something\n    console.log('Invalid data received:', JSON.stringify(inputData));\n    return [{\n      json: {\n        valid: false,\n        skip: true,\n        raw: inputData,\n        reason: 'Missing coordinates'\n      }\n    }];\n  }\n} catch (error) {\n  // Handle any errors\n  console.error('Error processing Owntracks data:', error);\n  return [{\n    json: {\n      valid: false,\n      skip: true,\n      error: error.message\n    }\n  }];\n}"
+        },
+        "id": "filter-location",
+        "name": "Filter Location Data",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{ $json.skip }}"
+              }
+            ]
+          }
+        },
+        "id": "check-skip",
+        "name": "Should Send?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          656,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.POKE_API_URL || 'http://localhost:8000/api/location' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": []
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "send-to-poke",
+        "name": "Send to Poke",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          864,
+          208
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "poke-api-key",
+            "name": "Poke API Key"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Success handler\\nconst item = $input.item.json;\\n\\nconsole.log('✅ Successfully sent to Poke');\\nconsole.log('Response:', JSON.stringify(item, null, 2));\\n\\nreturn {\\n  json: {\\n    success: true,\\n    status: item.statusCode || 200,\\n    message: 'Location update sent to Poke',\\n    timestamp: new Date().toISOString()\\n  }\\n};"
+        },
+        "id": "log-success",
+        "name": "Log Success",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1056,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Skipped handler\\nconst item = $input.item.json;\\n\\nconsole.log('⏭️  Location update skipped');\\nconsole.log('Reason:', item.reason || 'No reason provided');\\n\\nreturn {\\n  json: {\\n    skipped: true,\\n    reason: item.reason,\\n    timestamp: new Date().toISOString()\\n  }\\n};"
+        },
+        "id": "log-skipped",
+        "name": "Log Skipped",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          864,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Error handler\\nconst error = $input.item.json;\\n\\nconsole.error('❌ Error processing location update');\\nconsole.error('Error:', JSON.stringify(error, null, 2));\\n\\n// Return error details\\nreturn {\\n  json: {\\n    error: true,\\n    message: error.message || 'Unknown error',\\n    details: error,\\n    timestamp: new Date().toISOString()\\n  }\\n};"
+        },
+        "id": "handle-error",
+        "name": "Handle Error",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1056,
+          304
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook - Owntracks": {
+        "main": [
+          [
+            {
+              "node": "Filter Location Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter Location Data": {
+        "main": [
+          [
+            {
+              "node": "Should Send?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Should Send?": {
+        "main": [
+          [
+            {
+              "node": "Send to Poke",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Skipped",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send to Poke": {
+        "main": [
+          [
+            {
+              "node": "Log Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Lina F",
+    "name": "Version 33a4df28",
+    "description": "",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-19T11:00:19.360Z",
+        "id": 21,
+        "workflowId": "lOVfBNjOpIc3hZxZ",
+        "versionId": "33a4df28-185f-45fb-8ff9-ff2c8f8f45c0",
+        "event": "activated",
+        "userId": "319eaa7a-83a0-4f1d-ba6e-595ef2af39b3"
+      }
+    ]
+  }
 }
