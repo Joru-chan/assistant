@@ -28,7 +28,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Owntracks Location Data Filter and Transformer\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst item = $input.item.json;\nconst MIN_ACCURACY = 50;  // meters\nconst MIN_DISTANCE = 20;  // meters\n\n// Log incoming data for debugging\nconsole.log('📍 Received Owntracks data:', JSON.stringify(item, null, 2));\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// EXTRACT OWNTRACKS DATA\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Owntracks sends data in this format:\n// {\n//   \"_type\": \"location\",\n//   \"lat\": 51.5074,\n//   \"lon\": -0.1278,\n//   \"acc\": 10,\n//   \"tst\": 1234567890,\n//   \"alt\": 100,\n//   \"vel\": 0,\n//   \"batt\": 85,\n//   \"tid\": \"JF\",\n//   \"t\": \"u\"\n// }\n\nconst data = {\n  type: item._type || 'location',\n  latitude: item.lat,\n  longitude: item.lon,\n  accuracy: item.acc,\n  timestamp: item.tst,\n  altitude: item.alt,\n  velocity: item.vel,\n  battery: item.batt,\n  tracker_id: item.tid,\n  trigger: item.t  // 'u' = user, 'p' = ping, 't' = timer, etc.\n};\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// VALIDATION\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst validationErrors = [];\n\nif (!data.latitude || !data.longitude) {\n  validationErrors.push('Missing latitude or longitude');\n}\n\nif (data.latitude < -90 || data.latitude > 90) {\n  validationErrors.push('Invalid latitude: ' + data.latitude);\n}\n\nif (data.longitude < -180 || data.longitude > 180) {\n  validationErrors.push('Invalid longitude: ' + data.longitude);\n}\n\nif (validationErrors.length > 0) {\n  console.error('❌ Validation errors:', validationErrors);\n  return {\n    json: {\n      error: 'Validation failed',\n      details: validationErrors,\n      skip: true\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// FILTERING LOGIC\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst shouldSkip = [];\n\n// Filter 1: GPS Accuracy\n// Skip if accuracy is worse than threshold (higher = worse)\nif (data.accuracy && data.accuracy > MIN_ACCURACY) {\n  shouldSkip.push(`Low accuracy: ${data.accuracy}m > ${MIN_ACCURACY}m`);\n}\n\n// Filter 2: Check if this is a significant movement\n// (This would ideally compare with last known position from storage)\n// For now, we'll accept all validated locations\n\n// Filter 3: Ignore certain trigger types if needed\n// For example, skip 'p' (ping) updates if you only want manual/timer\nconst ignoredTriggers = [];  // e.g., ['p'] to ignore pings\n\nif (data.trigger && ignoredTriggers.includes(data.trigger)) {\n  shouldSkip.push(`Ignored trigger type: ${data.trigger}`);\n}\n\nif (shouldSkip.length > 0) {\n  console.log('⏭️  Skipping location update:', shouldSkip);\n  return {\n    json: {\n      skip: true,\n      reason: shouldSkip,\n      data: data\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// TRANSFORM FOR POKE\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Convert timestamp to ISO format\nconst timestamp = data.timestamp\n  ? new Date(data.timestamp * 1000).toISOString()\n  : new Date().toISOString();\n\n// Format data for Poke API\nconst pokePayload = {\n  type: 'location_update',\n  source: 'owntracks',\n  timestamp: timestamp,\n  location: {\n    latitude: data.latitude,\n    longitude: data.longitude,\n    accuracy: data.accuracy,\n    altitude: data.altitude,\n    velocity: data.velocity\n  },\n  device: {\n    tracker_id: data.tracker_id,\n    battery: data.battery,\n    trigger: data.trigger\n  },\n  metadata: {\n    raw_timestamp: data.timestamp,\n    processed_at: new Date().toISOString()\n  }\n};\n\nconsole.log('✅ Location update passed filters');\nconsole.log('📤 Sending to Poke:', JSON.stringify(pokePayload, null, 2));\n\nreturn {\n  json: {\n    skip: false,\n    poke_payload: pokePayload,\n    original_data: data\n  }\n};"
+        "jsCode": "// Owntracks Location Data Filter and Transformer\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst item = $input.item.json;\nconst MIN_ACCURACY = 50;  // meters\nconst MIN_DISTANCE = 20;  // meters\n\n// Log incoming data for debugging\nconsole.log('📍 Received Owntracks data:', JSON.stringify(item, null, 2));\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// EXTRACT OWNTRACKS DATA\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Owntracks sends data in this format:\n// {\n//   \"_type\": \"location\",\n//   \"lat\": 51.5074,\n//   \"lon\": -0.1278,\n//   \"acc\": 10,\n//   \"tst\": 1234567890,\n//   \"alt\": 100,\n//   \"vel\": 0,\n//   \"batt\": 85,\n//   \"tid\": \"JF\",\n//   \"t\": \"u\"\n// }\n\nconst data = {\n  type: item._type || 'location',\n  latitude: item.lat,\n  longitude: item.lon,\n  accuracy: item.acc,\n  timestamp: item.tst,\n  altitude: item.alt,\n  velocity: item.vel,\n  battery: item.batt,\n  tracker_id: item.tid,\n  trigger: item.t  // 'u' = user, 'p' = ping, 't' = timer, etc.\n};\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// VALIDATION\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst validationErrors = [];\n\nif (!data.latitude || !data.longitude) {\n  validationErrors.push('Missing latitude or longitude');\n}\n\nif (data.latitude < -90 || data.latitude > 90) {\n  validationErrors.push('Invalid latitude: ' + data.latitude);\n}\n\nif (data.longitude < -180 || data.longitude > 180) {\n  validationErrors.push('Invalid longitude: ' + data.longitude);\n}\n\nif (validationErrors.length > 0) {\n  console.error('❌ Validation errors:', validationErrors);\n  return {\n    json: {\n      error: 'Validation failed',\n      details: validationErrors,\n      skip: true\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// FILTERING LOGIC\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst shouldSkip = [];\n\n// Filter 1: GPS Accuracy\n// Skip if accuracy is worse than threshold (higher = worse)\nif (data.accuracy && data.accuracy > MIN_ACCURACY) {\n  shouldSkip.push(`Low accuracy: ${data.accuracy}m > ${MIN_ACCURACY}m`);\n}\n\n// Filter 2: Check if this is a significant movement\n// (This would ideally compare with last known position from storage)\n// For now, we'll accept all validated locations\n\n// Filter 3: Ignore certain trigger types if needed\n// For example, skip 'p' (ping) updates if you only want manual/timer\nconst ignoredTriggers = [];  // e.g., ['p'] to ignore pings\n\nif (data.trigger && ignoredTriggers.includes(data.trigger)) {\n  shouldSkip.push(`Ignored trigger type: ${data.trigger}`);\n}\n\nif (shouldSkip.length > 0) {\n  console.log('⏭️  Skipping location update:', shouldSkip);\n  return {\n    json: {\n      skip: true,\n      reason: shouldSkip,\n      data: data\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// TRANSFORM FOR POKE\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Convert timestamp to ISO format\nconst timestamp = data.timestamp\n  ? new Date(data.timestamp * 1000).toISOString()\n  : new Date().toISOString();\n\n// Format data for Poke API\nconst pokePayload = {\n  type: 'location_update',\n  source: 'owntracks',\n  timestamp: timestamp,\n  location: {\n    latitude: data.latitude,\n    longitude: data.longitude,\n    accuracy: data.accuracy,\n    altitude: data.altitude,\n    velocity: data.velocity\n  },\n  device: {\n    tracker_id: data.tracker_id,\n    battery: data.battery,\n    trigger: data.trigger\n  },\n  metadata: {\n    raw_timestamp: data.timestamp,\n    processed_at: new Date().toISOString()\n  }\n};\n\nconsole.log('✅ Location update passed filters');\nconsole.log('📤 Sending to Poke:', JSON.stringify(pokePayload, null, 2));\n\nreturn {\n  json: {\n    skip: false,\n    source: 'owntracks',\n    type: data.type,\n    coordinates: {\n      latitude: data.latitude,\n      longitude: data.longitude\n    },\n    device: {\n      tracker_id: data.tracker_id,\n      battery: data.battery\n    },\n    poke_payload: pokePayload,\n    original_data: data\n  }\n};"
       },
       "id": "filter-location",
       "name": "Filter Location Data",
@@ -60,6 +60,20 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Format for Poke Webhook\nconst item = $input.first();\ntry {\n  // Extract the data we need\n  const locationData = {\n    source: item.json.source,\n    type: item.json.type,\n    coordinates: item.json.coordinates,\n    device: item.json.device\n  };\n  \n  // Convert to the format Poke expects\n  return [{\n    json: {\n      message: JSON.stringify(locationData)\n    }\n  }];\n} catch (error) {\n  console.error('Error formatting for Poke:', error);\n  return [{\n    json: {\n      message: JSON.stringify({\n        error: error.message,\n        source: \"owntracks\"\n      })\n    }\n  }];\n}"
+      },
+      "id": "format-poke-webhook",
+      "name": "Format for Poke Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        208
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "=https://poke.com/api/v1/inbound-sms/webhook",
         "authentication": "genericCredentialType",
@@ -82,7 +96,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        864,
+        944,
         208
       ],
       "credentials": {
@@ -106,7 +120,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1056,
+        1136,
         208
       ]
     },
@@ -134,7 +148,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1056,
+        1136,
         304
       ]
     }
@@ -166,7 +180,7 @@
       "main": [
         [
           {
-            "node": "Send to Poke",
+            "node": "Format for Poke Webhook",
             "type": "main",
             "index": 0
           }
@@ -174,6 +188,17 @@
         [
           {
             "node": "Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Poke Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send to Poke",
             "type": "main",
             "index": 0
           }
@@ -204,7 +229,7 @@
   "pinData": {},
   "versionId": "873486d2-eaa8-43c7-884d-f2320841a354",
   "activeVersionId": "873486d2-eaa8-43c7-884d-f2320841a354",
-  "versionCounter": 70,
+  "versionCounter": 71,
   "triggerCount": 1,
   "shared": [
     {
@@ -253,7 +278,7 @@
       {
         "parameters": {
           "mode": "runOnceForEachItem",
-          "jsCode": "// Owntracks Location Data Filter and Transformer\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst item = $input.item.json;\nconst MIN_ACCURACY = 50;  // meters\nconst MIN_DISTANCE = 20;  // meters\n\n// Log incoming data for debugging\nconsole.log('📍 Received Owntracks data:', JSON.stringify(item, null, 2));\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// EXTRACT OWNTRACKS DATA\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Owntracks sends data in this format:\n// {\n//   \"_type\": \"location\",\n//   \"lat\": 51.5074,\n//   \"lon\": -0.1278,\n//   \"acc\": 10,\n//   \"tst\": 1234567890,\n//   \"alt\": 100,\n//   \"vel\": 0,\n//   \"batt\": 85,\n//   \"tid\": \"JF\",\n//   \"t\": \"u\"\n// }\n\nconst data = {\n  type: item._type || 'location',\n  latitude: item.lat,\n  longitude: item.lon,\n  accuracy: item.acc,\n  timestamp: item.tst,\n  altitude: item.alt,\n  velocity: item.vel,\n  battery: item.batt,\n  tracker_id: item.tid,\n  trigger: item.t  // 'u' = user, 'p' = ping, 't' = timer, etc.\n};\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// VALIDATION\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst validationErrors = [];\n\nif (!data.latitude || !data.longitude) {\n  validationErrors.push('Missing latitude or longitude');\n}\n\nif (data.latitude < -90 || data.latitude > 90) {\n  validationErrors.push('Invalid latitude: ' + data.latitude);\n}\n\nif (data.longitude < -180 || data.longitude > 180) {\n  validationErrors.push('Invalid longitude: ' + data.longitude);\n}\n\nif (validationErrors.length > 0) {\n  console.error('❌ Validation errors:', validationErrors);\n  return {\n    json: {\n      error: 'Validation failed',\n      details: validationErrors,\n      skip: true\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// FILTERING LOGIC\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst shouldSkip = [];\n\n// Filter 1: GPS Accuracy\n// Skip if accuracy is worse than threshold (higher = worse)\nif (data.accuracy && data.accuracy > MIN_ACCURACY) {\n  shouldSkip.push(`Low accuracy: ${data.accuracy}m > ${MIN_ACCURACY}m`);\n}\n\n// Filter 2: Check if this is a significant movement\n// (This would ideally compare with last known position from storage)\n// For now, we'll accept all validated locations\n\n// Filter 3: Ignore certain trigger types if needed\n// For example, skip 'p' (ping) updates if you only want manual/timer\nconst ignoredTriggers = [];  // e.g., ['p'] to ignore pings\n\nif (data.trigger && ignoredTriggers.includes(data.trigger)) {\n  shouldSkip.push(`Ignored trigger type: ${data.trigger}`);\n}\n\nif (shouldSkip.length > 0) {\n  console.log('⏭️  Skipping location update:', shouldSkip);\n  return {\n    json: {\n      skip: true,\n      reason: shouldSkip,\n      data: data\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// TRANSFORM FOR POKE\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Convert timestamp to ISO format\nconst timestamp = data.timestamp\n  ? new Date(data.timestamp * 1000).toISOString()\n  : new Date().toISOString();\n\n// Format data for Poke API\nconst pokePayload = {\n  type: 'location_update',\n  source: 'owntracks',\n  timestamp: timestamp,\n  location: {\n    latitude: data.latitude,\n    longitude: data.longitude,\n    accuracy: data.accuracy,\n    altitude: data.altitude,\n    velocity: data.velocity\n  },\n  device: {\n    tracker_id: data.tracker_id,\n    battery: data.battery,\n    trigger: data.trigger\n  },\n  metadata: {\n    raw_timestamp: data.timestamp,\n    processed_at: new Date().toISOString()\n  }\n};\n\nconsole.log('✅ Location update passed filters');\nconsole.log('📤 Sending to Poke:', JSON.stringify(pokePayload, null, 2));\n\nreturn {\n  json: {\n    skip: false,\n    poke_payload: pokePayload,\n    original_data: data\n  }\n};"
+          "jsCode": "// Owntracks Location Data Filter and Transformer\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst item = $input.item.json;\nconst MIN_ACCURACY = 50;  // meters\nconst MIN_DISTANCE = 20;  // meters\n\n// Log incoming data for debugging\nconsole.log('📍 Received Owntracks data:', JSON.stringify(item, null, 2));\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// EXTRACT OWNTRACKS DATA\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Owntracks sends data in this format:\n// {\n//   \"_type\": \"location\",\n//   \"lat\": 51.5074,\n//   \"lon\": -0.1278,\n//   \"acc\": 10,\n//   \"tst\": 1234567890,\n//   \"alt\": 100,\n//   \"vel\": 0,\n//   \"batt\": 85,\n//   \"tid\": \"JF\",\n//   \"t\": \"u\"\n// }\n\nconst data = {\n  type: item._type || 'location',\n  latitude: item.lat,\n  longitude: item.lon,\n  accuracy: item.acc,\n  timestamp: item.tst,\n  altitude: item.alt,\n  velocity: item.vel,\n  battery: item.batt,\n  tracker_id: item.tid,\n  trigger: item.t  // 'u' = user, 'p' = ping, 't' = timer, etc.\n};\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// VALIDATION\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst validationErrors = [];\n\nif (!data.latitude || !data.longitude) {\n  validationErrors.push('Missing latitude or longitude');\n}\n\nif (data.latitude < -90 || data.latitude > 90) {\n  validationErrors.push('Invalid latitude: ' + data.latitude);\n}\n\nif (data.longitude < -180 || data.longitude > 180) {\n  validationErrors.push('Invalid longitude: ' + data.longitude);\n}\n\nif (validationErrors.length > 0) {\n  console.error('❌ Validation errors:', validationErrors);\n  return {\n    json: {\n      error: 'Validation failed',\n      details: validationErrors,\n      skip: true\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// FILTERING LOGIC\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nconst shouldSkip = [];\n\n// Filter 1: GPS Accuracy\n// Skip if accuracy is worse than threshold (higher = worse)\nif (data.accuracy && data.accuracy > MIN_ACCURACY) {\n  shouldSkip.push(`Low accuracy: ${data.accuracy}m > ${MIN_ACCURACY}m`);\n}\n\n// Filter 2: Check if this is a significant movement\n// (This would ideally compare with last known position from storage)\n// For now, we'll accept all validated locations\n\n// Filter 3: Ignore certain trigger types if needed\n// For example, skip 'p' (ping) updates if you only want manual/timer\nconst ignoredTriggers = [];  // e.g., ['p'] to ignore pings\n\nif (data.trigger && ignoredTriggers.includes(data.trigger)) {\n  shouldSkip.push(`Ignored trigger type: ${data.trigger}`);\n}\n\nif (shouldSkip.length > 0) {\n  console.log('⏭️  Skipping location update:', shouldSkip);\n  return {\n    json: {\n      skip: true,\n      reason: shouldSkip,\n      data: data\n    }\n  };\n}\n\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// TRANSFORM FOR POKE\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n// Convert timestamp to ISO format\nconst timestamp = data.timestamp\n  ? new Date(data.timestamp * 1000).toISOString()\n  : new Date().toISOString();\n\n// Format data for Poke API\nconst pokePayload = {\n  type: 'location_update',\n  source: 'owntracks',\n  timestamp: timestamp,\n  location: {\n    latitude: data.latitude,\n    longitude: data.longitude,\n    accuracy: data.accuracy,\n    altitude: data.altitude,\n    velocity: data.velocity\n  },\n  device: {\n    tracker_id: data.tracker_id,\n    battery: data.battery,\n    trigger: data.trigger\n  },\n  metadata: {\n    raw_timestamp: data.timestamp,\n    processed_at: new Date().toISOString()\n  }\n};\n\nconsole.log('✅ Location update passed filters');\nconsole.log('📤 Sending to Poke:', JSON.stringify(pokePayload, null, 2));\n\nreturn {\n  json: {\n    skip: false,\n    source: 'owntracks',\n    type: data.type,\n    coordinates: {\n      latitude: data.latitude,\n      longitude: data.longitude\n    },\n    device: {\n      tracker_id: data.tracker_id,\n      battery: data.battery\n    },\n    poke_payload: pokePayload,\n    original_data: data\n  }\n};"
         },
         "id": "filter-location",
         "name": "Filter Location Data",
@@ -285,6 +310,20 @@
       },
       {
         "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Format for Poke Webhook\nconst item = $input.first();\ntry {\n  // Extract the data we need\n  const locationData = {\n    source: item.json.source,\n    type: item.json.type,\n    coordinates: item.json.coordinates,\n    device: item.json.device\n  };\n  \n  // Convert to the format Poke expects\n  return [{\n    json: {\n      message: JSON.stringify(locationData)\n    }\n  }];\n} catch (error) {\n  console.error('Error formatting for Poke:', error);\n  return [{\n    json: {\n      message: JSON.stringify({\n        error: error.message,\n        source: \"owntracks\"\n      })\n    }\n  }];\n}"
+        },
+        "id": "format-poke-webhook",
+        "name": "Format for Poke Webhook",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          784,
+          208
+        ]
+      },
+      {
+        "parameters": {
           "method": "POST",
           "url": "=https://poke.com/api/v1/inbound-sms/webhook",
           "authentication": "genericCredentialType",
@@ -307,7 +346,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4,
         "position": [
-          864,
+          944,
           208
         ],
         "credentials": {
@@ -331,7 +370,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1056,
+          1136,
           208
         ]
       },
@@ -359,7 +398,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1056,
+          1136,
           304
         ]
       }
@@ -391,7 +430,7 @@
         "main": [
           [
             {
-              "node": "Send to Poke",
+              "node": "Format for Poke Webhook",
               "type": "main",
               "index": 0
             }
@@ -399,6 +438,17 @@
           [
             {
               "node": "Log Skipped",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format for Poke Webhook": {
+        "main": [
+          [
+            {
+              "node": "Send to Poke",
               "type": "main",
               "index": 0
             }
