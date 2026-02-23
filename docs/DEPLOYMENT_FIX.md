@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explains the deployment health check fixes and how to configure your secrets correctly.
+This document explains the deployment health check fixes and how they work with your existing configuration.
 
 ## What Was Fixed
 
@@ -35,57 +35,56 @@ async def health() -> dict:
 - Tried to call non-existent MCP tool `health_check` via JSON-RPC
 - No URL validation
 - Poor error messages
-- Used `VMMCPURL` which pointed to MCP endpoint
 
 **After:**
 - Direct HTTP GET request to `/health` endpoint
 - URL validation before making requests
+- Constructs health URL from existing `VMMCPURL` secret
 - Clear error messages with troubleshooting steps
-- Uses `VM_HEALTH_URL` which points to health endpoint
 
-## Required Configuration
+## How It Works
 
-### GitHub Secrets
+### URL Construction
 
-You need to configure the following secrets in your repository settings:
+The workflow now automatically constructs the health check URL from your existing `VMMCPURL` secret:
 
-#### VM_HEALTH_URL (Required - New/Updated)
-
-This should point to your server's health endpoint:
-
-```
-http://your-vm-ip-or-hostname:8000/health
-```
+1. Takes the `VMMCPURL` value (e.g., `http://192.168.1.100:8000`)
+2. Removes any trailing slashes
+3. Appends `/health` to create the health check URL
+4. Validates the URL format before use
 
 **Example:**
-```
-http://192.168.1.100:8000/health
-```
+- `VMMCPURL` = `http://192.168.1.100:8000` → Health URL = `http://192.168.1.100:8000/health`
+- `VMMCPURL` = `http://192.168.1.100:8000/` → Health URL = `http://192.168.1.100:8000/health`
+- `VMMCPURL` = `https://mcp.example.com` → Health URL = `https://mcp.example.com/health`
 
-or with domain:
-```
-https://mcp.yourdomain.com/health
-```
+### No Configuration Changes Required
 
-#### VMMCPURL (Optional - Can be removed)
+✅ **You don't need to update any secrets!** The workflow uses your existing `VMMCPURL` configuration.
 
-This is **no longer used** by the workflow. You can safely delete this secret.
+## Required Secrets
 
-If you need it for other purposes, it should point to your MCP endpoint:
-```
-http://your-vm-ip-or-hostname:8000/mcp/v1
-```
+Your existing secrets should already be configured. For reference:
 
-### Other Required Secrets
-
-These should already be configured:
-
+- `VMMCPURL` - Your MCP server URL (e.g., `http://your-vm:8000`)
 - `VM_HOST` - Your VM hostname or IP
 - `VM_USER` - SSH username for deployment
 - `VM_SERVICE` - Systemd service name (e.g., `mcp-server`)
 - `VMDEST_DIR` - Deployment directory on VM
 - `VM_VENV_PY` - Path to Python in venv
 - `VMSSHPRIVATE_KEY_B64` - Base64-encoded SSH private key
+
+### Verify Your VMMCPURL Secret
+
+Make sure your `VMMCPURL` secret is in one of these formats:
+
+✅ `http://hostname:8000`  
+✅ `http://192.168.1.100:8000`  
+✅ `https://mcp.yourdomain.com`  
+✅ `http://hostname:8000/` (trailing slash is OK, will be removed)  
+
+❌ `hostname:8000` (missing http://)  
+❌ `192.168.1.100` (missing http:// and port)  
 
 ## Testing the Fix
 
@@ -114,18 +113,38 @@ After merging this PR, trigger a deployment:
 The workflow should now:
 - ✅ Complete successfully
 - ✅ Show "✅ HTTP health check successful (HTTP 200)"
+- ✅ Display the constructed health URL
 - ✅ No more "URL rejected" or "HTTP 400" errors
 
 ## Troubleshooting
 
+### Issue: "VMMCPURL secret is empty or not set"
+
+**Cause:** The secret is not configured in repository settings.
+
+**Solution:**
+```
+1. Go to: Settings → Secrets and variables → Actions
+2. Add or update VMMCPURL
+3. Set to: http://your-vm-ip:8000
+```
+
+### Issue: "Invalid URL format: [URL]"
+
+**Cause:** `VMMCPURL` doesn't start with `http://` or `https://`.
+
+**Solution:**
+- Update `VMMCPURL` to include the protocol
+- Example: Change `192.168.1.100:8000` to `http://192.168.1.100:8000`
+
 ### Issue: "URL rejected: Malformed input to a URL function"
 
-**Cause:** `VM_HEALTH_URL` secret is not properly formatted.
+**Cause:** URL contains invalid characters or formatting.
 
-**Solution:** 
-- Ensure URL starts with `http://` or `https://`
-- No spaces or special characters
-- Valid hostname/IP and port
+**Solution:**
+- Check for spaces or special characters in VMMCPURL
+- Ensure proper URL encoding
+- Verify hostname/IP is valid
 
 ### Issue: "HTTP health check failed (HTTP 000)"
 
@@ -147,6 +166,15 @@ sudo ufw allow 8000/tcp  # if needed
 # 4. View logs
 sudo journalctl -u mcp-server -n 50 --no-pager
 ```
+
+### Issue: "Could not resolve host"
+
+**Cause:** Hostname in VMMCPURL cannot be resolved.
+
+**Solution:**
+- Verify the hostname is correct
+- Consider using IP address instead
+- Check DNS configuration
 
 ### Issue: "HTTP 404 Not Found"
 
@@ -211,6 +239,8 @@ You can use this endpoint with monitoring services like:
 - StatusCake
 - Custom monitoring scripts
 
+Set the monitoring URL to: `http://your-vm:8000/health`
+
 ## Deployment Flow
 
 After this fix, the deployment flow is:
@@ -219,21 +249,38 @@ After this fix, the deployment flow is:
 2. **Dependencies** - Install/update Python packages
 3. **Service Restart** - Restart systemd service
 4. **Service Status Check** - Verify service is active
-5. **URL Validation** - Check health URL is properly formatted
-6. **Health Check** - GET request to /health endpoint (with retries)
-7. **Success** ✅ or **Failure** ❌ with detailed diagnostics
+5. **URL Construction** - Build health URL from VMMCPURL
+6. **URL Validation** - Check health URL is properly formatted
+7. **Health Check** - GET request to /health endpoint (with retries)
+8. **Success** ✅ or **Failure** ❌ with detailed diagnostics
 
-## Migration Steps
+## What Changed vs Previous Documentation
 
-If you're updating from the old configuration:
+**Previous version** (now outdated):
+- Required creating a new `VM_HEALTH_URL` secret
+- Two separate secrets to manage
 
-1. **Merge this PR**
-2. **Update `VM_HEALTH_URL` secret:**
-   - Go to: Settings → Secrets and variables → Actions
-   - Update or create `VM_HEALTH_URL`
-   - Set to: `http://your-vm:8000/health`
-3. **Optional: Remove `VMMCPURL` secret** (no longer needed)
-4. **Trigger a deployment** to test
+**Current version** (this fix):
+- ✅ Uses existing `VMMCPURL` secret
+- ✅ Automatically constructs health URL
+- ✅ No secret changes required
+- ✅ Simpler configuration
+
+## Testing Checklist
+
+Before merging, verify:
+
+- [ ] `VMMCPURL` secret exists and is properly formatted
+- [ ] `VMMCPURL` starts with `http://` or `https://`
+- [ ] Server is accessible at the URL in `VMMCPURL`
+- [ ] `/health` endpoint responds with 200 OK locally
+
+After merging:
+
+- [ ] Deployment completes successfully
+- [ ] Health check passes
+- [ ] Workflow logs show constructed health URL
+- [ ] No URL validation errors
 
 ## Questions?
 
@@ -242,7 +289,7 @@ If you encounter issues:
 1. Check the deployment logs in GitHub Actions
 2. Review this troubleshooting guide
 3. SSH to VM and check service status/logs
-4. Verify secret configuration
+4. Verify `VMMCPURL` secret configuration
 
 ---
 
