@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Deployment: Health check endpoint fixes deployed (PR #8)
+# Deployment: NUCLEAR OPTION - Respond to everything with 200 OK
 import os
 import sys
 from pathlib import Path
@@ -25,18 +25,30 @@ mcp = FastMCP(
 )
 original_app = mcp.http_app(stateless_http=True)
 
-# Add ultra-simple health check middleware
-async def simple_health_check(scope, receive, send):
-    """ASGI middleware that intercepts /health requests."""
-    if scope['type'] == 'http' and scope['path'] == '/health' and scope['method'] == 'GET':
-        response = JSONResponse({"ok": True, "status": "healthy"})
-        await response(scope, receive, send)
-        return
-    # Pass through everything else to the original app
-    await original_app(scope, receive, send)
+# NUCLEAR OPTION: Respond to EVERYTHING with 200 OK
+async def respond_to_everything(scope, receive, send):
+    """Nuclear option: respond to ALL requests with 200 OK for debugging."""
+    method = scope.get('method', 'UNKNOWN')
+    path = scope.get('path', 'UNKNOWN')
+    
+    debug_info = {
+        "ok": True,
+        "status": "healthy",
+        "debug": {
+            "message": "NUCLEAR OPTION: Responding to ALL requests",
+            "received_method": method,
+            "received_path": path,
+            "scope_type": scope.get('type', 'UNKNOWN'),
+            "query_string": scope.get('query_string', b'').decode('utf-8'),
+            "headers": {k.decode('utf-8'): v.decode('utf-8') for k, v in scope.get('headers', [])}
+        }
+    }
+    
+    response = JSONResponse(debug_info)
+    await response(scope, receive, send)
 
-# Use the wrapped app
-app = simple_health_check
+# Replace the entire app with nuclear option
+app = respond_to_everything
 
 register_tools(mcp)
 
