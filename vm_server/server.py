@@ -13,7 +13,6 @@ except ImportError:
 
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
-from starlette.routing import Route
 
 ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
@@ -26,13 +25,19 @@ mcp = FastMCP(
 )
 app = mcp.http_app(stateless_http=True)
 
-# Register health endpoint for external checks using Starlette routing
-async def health_endpoint(request):
-    """Health check endpoint for monitoring."""
-    return JSONResponse({"ok": True, "status": "healthy"})
+# Add ultra-simple health check middleware
+async def simple_health_check(scope, receive, send):
+    """ASGI middleware that intercepts /health requests."""
+    if scope['type'] == 'http' and scope['path'] == '/health' and scope['method'] == 'GET':
+        response = JSONResponse({"ok": True, "status": "healthy"})
+        await response(scope, receive, send)
+        return
+    # Pass through everything else to the original app
+    await original_app(scope, receive, send)
 
-# Add the health route with explicit GET method support
-app.routes.append(Route("/health", health_endpoint, methods=["GET"]))
+# Replace app with our wrapper
+original_app = app
+app = simple_health_check
 
 register_tools(mcp)
 
