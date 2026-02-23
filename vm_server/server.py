@@ -23,7 +23,7 @@ from tools.registry import register_tools
 mcp = FastMCP(
     "Lina Serendipity MCP Server",
 )
-app = mcp.http_app(stateless_http=True)
+original_app = mcp.http_app(stateless_http=True)
 
 # Add ultra-simple health check middleware
 async def simple_health_check(scope, receive, send):
@@ -35,8 +35,7 @@ async def simple_health_check(scope, receive, send):
     # Pass through everything else to the original app
     await original_app(scope, receive, send)
 
-# Replace app with our wrapper
-original_app = app
+# Use the wrapped app
 app = simple_health_check
 
 register_tools(mcp)
