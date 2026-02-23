@@ -109,9 +109,9 @@ OwnTracks App → n8n Webhook → Filter & Transform → MCP Server → Notion/S
 
 ##### Python 3.11 Installation
 
-**For Ubuntu 20.04 users** (Python 3.11 isn't in default repositories):
+**For Ubuntu 20.04 users:**
 
-> **Note:** Ubuntu 20.04 requires the deadsnakes PPA to access Python 3.11, as it's not available in the default repositories.
+> **Note:** Ubuntu 20.04 requires the deadsnakes PPA for Python 3.11, as it's not available in the default repositories.
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
