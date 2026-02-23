@@ -163,31 +163,43 @@ jobs:
               sudo systemctl status ${{ secrets.VM_SERVICE }} && \
               exit 1)"
 
-      - name: Validate health check URL
+      - name: Construct and validate health check URL
+        id: health_url
         run: |
-          echo "🔍 Validating health check URL..."
-          HEALTH_URL="${{ secrets.VM_HEALTH_URL }}"
+          echo "🔍 Constructing health check URL from VMMCPURL..."
+          BASE_URL="${{ secrets.VMMCPURL }}"
           
-          # Check if URL is empty
-          if [ -z "$HEALTH_URL" ]; then
-            echo "❌ VM_HEALTH_URL secret is empty or not set"
-            echo "Please configure the VM_HEALTH_URL secret in repository settings"
+          # Check if BASE_URL is empty
+          if [ -z "$BASE_URL" ]; then
+            echo "❌ VMMCPURL secret is empty or not set"
+            echo "Please configure the VMMCPURL secret in repository settings"
             exit 1
           fi
+          
+          # Remove trailing slashes
+          BASE_URL=$(echo "$BASE_URL" | sed 's:/*$::')
           
           # Check if URL starts with http:// or https://
-          if [[ ! "$HEALTH_URL" =~ ^https?:// ]]; then
-            echo "❌ Invalid URL format: $HEALTH_URL"
-            echo "URL must start with http:// or https://"
+          if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
+            echo "❌ Invalid URL format: $BASE_URL"
+            echo "VMMCPURL must start with http:// or https://"
             exit 1
           fi
           
-          echo "✅ Health check URL is valid: $HEALTH_URL"
+          # Construct health check URL
+          HEALTH_URL="${BASE_URL}/health"
+          
+          echo "✅ Base URL (VMMCPURL): $BASE_URL"
+          echo "✅ Health check URL: $HEALTH_URL"
+          echo ""
+          
+          # Export for next step
+          echo "HEALTH_URL=$HEALTH_URL" >> $GITHUB_OUTPUT
 
       - name: HTTP health check
         run: |
           echo "🏥 Running HTTP health check..."
-          HEALTH_URL="${{ secrets.VM_HEALTH_URL }}"
+          HEALTH_URL="${{ steps.health_url.outputs.HEALTH_URL }}"
           echo "🔍 Health URL: $HEALTH_URL"
           echo ""
           
@@ -209,8 +221,13 @@ HTTP_STATUS:000")
               echo "❌ Curl failed with exit code $curl_error"
               if echo "$response" | grep -q "URL rejected"; then
                 echo "❌ URL is malformed: $HEALTH_URL"
-                echo "Please check the VM_HEALTH_URL secret configuration"
+                echo "Please check the VMMCPURL secret configuration"
+                echo "Current value (sanitized): ${{ secrets.VMMCPURL }}"
                 exit 1
+              fi
+              if echo "$response" | grep -q "Could not resolve host"; then
+                echo "❌ Cannot resolve hostname in URL"
+                echo "Please verify the hostname/IP in VMMCPURL is correct"
               fi
             else
               status=$(echo "$response" | grep "HTTP_STATUS:" | tail -n1 | sed 's/HTTP_STATUS://')
@@ -243,6 +260,7 @@ HTTP_STATUS:000")
             echo "2. Check service logs: sudo journalctl -u ${{ secrets.VM_SERVICE }} -n 50"
             echo "3. Verify the health endpoint is accessible: curl -v $HEALTH_URL"
             echo "4. Check if port is listening: sudo netstat -tlnp | grep :8000"
+            echo "5. Verify VMMCPURL is set correctly: ${{ secrets.VMMCPURL }}"
             exit 1
           fi
 
@@ -262,7 +280,8 @@ HTTP_STATUS:000")
           echo "📍 Target: ${{ secrets.VM_HOST }}"
           echo "📂 Directory: ${{ secrets.VMDEST_DIR }}"
           echo "🔧 Service: ${{ secrets.VM_SERVICE }}"
-          echo "💚 Health URL: ${{ secrets.VM_HEALTH_URL }}"
+          echo "🌐 MCP URL: ${{ secrets.VMMCPURL }}"
+          echo "💚 Health URL: ${{ steps.health_url.outputs.HEALTH_URL }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Deployment failure notice
