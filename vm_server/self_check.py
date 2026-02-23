@@ -15,7 +15,7 @@ from tools.registry import register_tools
 
 
 def main() -> int:
-    mcp = FastMCP("Self-check MCP", stateless_http=True)
+    mcp = FastMCP("Self-check MCP")
     register_tools(mcp)
     print("OK: tools registry imported and registered.")
     return 0
