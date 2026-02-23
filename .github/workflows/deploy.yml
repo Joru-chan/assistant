@@ -212,8 +212,7 @@ jobs:
             echo "Attempt $attempt/$max_attempts..."
             
             # Use -f to fail on HTTP errors, capture both body and status
-            response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" "$HEALTH_URL" 2>&1 || echo "CURL_ERROR:$?
-HTTP_STATUS:000")
+            response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" "$HEALTH_URL" 2>&1 || { echo "CURL_ERROR:$?"; echo "HTTP_STATUS:000"; })
             
             # Check if curl itself failed
             if echo "$response" | grep -q "CURL_ERROR:"; then
