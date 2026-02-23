@@ -23,22 +23,11 @@ mcp = FastMCP(
 )
 app = mcp.http_app(stateless_http=True)
 
-
-# Optional health endpoint for external checks.
-def _register_health_route(server: FastMCP) -> bool:
-    app = getattr(server, "app", None)
-    if app is None or not hasattr(app, "get"):
-        return False
-
-    @app.get("/health")
-    async def health() -> dict:
-        return {"ok": True}
-
-    return True
-
-
-_HAS_HEALTH_ROUTE = _register_health_route(mcp)
-setattr(mcp, "_has_health_route", _HAS_HEALTH_ROUTE)
+# Register health endpoint for external checks on the HTTP app
+@app.get("/health")
+async def health() -> dict:
+    """Health check endpoint for monitoring."""
+    return {"ok": True, "status": "healthy"}
 
 register_tools(mcp)
 
