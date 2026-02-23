@@ -147,16 +147,56 @@ sudo apt install -y python3.11 python3.11-venv
 
 ## Part 1: MCP Server Setup
 
-### 1.1 Install Python and uv
+### 1.1 Install Rust, Python, and uv
 
 On your server (SSH into your VM/VPS):
+
+> **Important:** Rust is required as a prerequisite for installing uv. The uv package manager is built with Rust and requires the Rust toolchain to be installed first.
+
+#### Step 1: Install Rust
+
+```bash
+# Install Rust (required for uv)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Follow the prompts (press 1 for default installation)
+
+# Reload shell to use Rust
+source $HOME/.cargo/env
+
+# Verify Rust installation
+rustc --version
+cargo --version
+```
+
+#### Step 2: Install Python 3.11+ (if not already present)
 
 ```bash
 # Install Python 3.11+ if not present
 sudo apt update
 sudo apt install -y python3.11 python3.11-venv python3-pip
+```
 
-# Install uv (recommended Python package manager)
+#### Step 3: Install uv
+
+Now that Rust is installed, you can install uv:
+
+```bash
+# Install uv using pip (recommended)
+pip install uv
+
+# Or alternatively, install using Cargo (Rust's package manager):
+# cargo install uv
+
+# Verify installation
+uv --version
+```
+
+**Alternative installation method:**
+
+If you prefer to use the official uv installer script:
+
+```bash
+# Install uv using the official installer
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Reload your shell
