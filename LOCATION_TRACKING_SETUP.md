@@ -147,28 +147,11 @@ sudo apt install -y python3.11 python3.11-venv
 
 ## Part 1: MCP Server Setup
 
-### 1.1 Install Rust, Python, and uv
+### 1.1 Install Python and uv
 
 On your server (SSH into your VM/VPS):
 
-> **Important:** Rust is required as a prerequisite for installing uv. The uv package manager is built with Rust and requires the Rust toolchain to be installed first.
-
-#### Step 1: Install Rust
-
-```bash
-# Install Rust (required for uv)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Follow the prompts (press 1 for default installation)
-
-# Reload shell to use Rust
-source $HOME/.cargo/env
-
-# Verify Rust installation
-rustc --version
-cargo --version
-```
-
-#### Step 2: Install Python 3.11+ (if not already present)
+#### Step 1: Install Python 3.11+ (if not already present)
 
 ```bash
 # Install Python 3.11+ if not present
@@ -176,35 +159,95 @@ sudo apt update
 sudo apt install -y python3.11 python3.11-venv python3-pip
 ```
 
-#### Step 3: Install uv
+#### Step 2: Install uv
 
-Now that Rust is installed, you can install uv:
+uv is a fast Python package installer and resolver. Choose one of the installation methods below:
 
-```bash
-# Install uv using pip (recommended)
-pip install uv
+---
 
-# Or alternatively, install using Cargo (Rust's package manager):
-# cargo install uv
+**Method 1 (Recommended): Official installer**
 
-# Verify installation
-uv --version
-```
-
-**Alternative installation method:**
-
-If you prefer to use the official uv installer script:
+This is the preferred method for most users, especially those on VM instances. It's fast, efficient, and doesn't require compiling from source.
 
 ```bash
 # Install uv using the official installer
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Reload your shell
+# Reload your shell to use uv
 source $HOME/.cargo/env
 
 # Verify installation
 uv --version
 ```
+
+---
+
+**Method 2 (Alternative): If you already have Python**
+
+If you already have Python and pip installed, you can use pip to install uv:
+
+```bash
+# Install uv using pip
+pip install uv
+
+# Verify installation
+uv --version
+```
+
+---
+
+**Method 3 (Not recommended for VMs): Using Rust/Cargo**
+
+> ⚠️ **WARNING: This method is extremely resource-intensive and NOT recommended for:**
+> - Free-tier VM instances (Oracle, AWS, GCP, Azure free tiers)
+> - Systems with limited CPU or RAM (< 2 GB RAM)
+> - VPS instances with restricted resources
+> - Any environment where you're paying for CPU time
+>
+> **Why avoid this method?**
+> - Requires compiling uv from source, which can take 30+ minutes
+> - Uses significant CPU resources (100% CPU utilization)
+> - Uses 1-2 GB of RAM during compilation
+> - May cause system instability on low-resource VMs
+> - Can trigger resource limits and get your process killed
+> - The official installer (Method 1) downloads pre-built binaries and is much faster
+>
+> **Only use this method if:**
+> - Methods 1 and 2 have both failed
+> - You have a powerful server with dedicated resources
+> - You understand the resource implications
+
+```bash
+# Step 1: Install Rust (required for cargo)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Follow the prompts (press 1 for default installation)
+
+# Step 2: Reload shell to use Rust
+source $HOME/.cargo/env
+
+# Verify Rust installation
+rustc --version
+cargo --version
+
+# Step 3: Install uv using cargo (WARNING: This will take a long time and use significant resources)
+cargo install uv  # ⚠️ This can take 30+ minutes and use 100% CPU + 1-2GB RAM
+
+# Verify installation
+uv --version
+```
+
+**Expected behavior during cargo installation:**
+- Compilation will take 20-40 minutes depending on your system
+- CPU usage will spike to 100%
+- RAM usage will increase to 1-2 GB
+- The terminal may appear frozen (this is normal)
+- On free-tier VMs, the process may be killed due to resource limits
+
+If you see errors like "Killed" or "Out of memory", your system doesn't have enough resources for this method. Use Method 1 instead.
+
+---
+
+**Recommended:** Use **Method 1** (official installer) unless you have a specific reason to use another method.
 
 ### 1.2 Clone the Repository
 
