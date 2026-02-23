@@ -166,8 +166,20 @@ jobs:
       - name: Construct and validate health check URL
         id: health_url
         run: |
-          echo "🔍 Constructing health check URL from VMMCPURL..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 NUCLEAR OPTION DEBUG: URL CONSTRUCTION"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          echo "🔍 DEBUG: Original VMMCPURL secret value:"
+          echo "   ${{ secrets.VMMCPURL }}"
+          echo ""
+          
           BASE_URL="${{ secrets.VMMCPURL }}"
+          
+          echo "🔍 DEBUG: BASE_URL after assignment:"
+          echo "   BASE_URL='$BASE_URL'"
+          echo "   Length: ${#BASE_URL} characters"
+          echo ""
           
           # Check if BASE_URL is empty
           if [ -z "$BASE_URL" ]; then
@@ -179,6 +191,10 @@ jobs:
           # Remove trailing slashes
           BASE_URL=$(echo "$BASE_URL" | sed 's:/*$::')
           
+          echo "🔍 DEBUG: BASE_URL after removing trailing slashes:"
+          echo "   BASE_URL='$BASE_URL'"
+          echo ""
+          
           # Check if URL starts with http:// or https://
           if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
             echo "❌ Invalid URL format: $BASE_URL"
@@ -189,8 +205,14 @@ jobs:
           # Construct health check URL
           HEALTH_URL="${BASE_URL}/health"
           
+          echo "🔍 DEBUG: HEALTH_URL after construction:"
+          echo "   HEALTH_URL='$HEALTH_URL'"
+          echo "   Length: ${#HEALTH_URL} characters"
+          echo ""
+          
           echo "✅ Base URL (VMMCPURL): $BASE_URL"
           echo "✅ Health check URL: $HEALTH_URL"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
           
           # Export for next step
@@ -198,9 +220,18 @@ jobs:
 
       - name: HTTP health check
         run: |
-          echo "🏥 Running HTTP health check..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🏥 NUCLEAR OPTION DEBUG: HTTP HEALTH CHECK"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
           HEALTH_URL="${{ steps.health_url.outputs.HEALTH_URL }}"
-          echo "🔍 Health URL: $HEALTH_URL"
+          
+          echo "🔍 DEBUG: Health URL from output:"
+          echo "   HEALTH_URL='$HEALTH_URL'"
+          echo "   Length: ${#HEALTH_URL} characters"
+          echo ""
+          echo "🔍 DEBUG: Curl command that will be executed:"
+          echo "   curl -sS -w \"\\nHTTP_STATUS:%{http_code}\\n\" \"$HEALTH_URL\""
           echo ""
           
           max_attempts=10
@@ -209,10 +240,16 @@ jobs:
           
           while [ $attempt -lt $max_attempts ]; do
             attempt=$((attempt + 1))
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Attempt $attempt/$max_attempts..."
+            echo "🔍 DEBUG: Executing curl to: $HEALTH_URL"
             
             # Use -f to fail on HTTP errors, capture both body and status
             response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" "$HEALTH_URL" 2>&1 || { echo "CURL_ERROR:$?"; echo "HTTP_STATUS:000"; })
+            
+            echo "🔍 DEBUG: Raw curl response:"
+            echo "$response"
+            echo ""
             
             # Check if curl itself failed
             if echo "$response" | grep -q "CURL_ERROR:"; then
@@ -231,6 +268,11 @@ jobs:
             else
               status=$(echo "$response" | grep "HTTP_STATUS:" | tail -n1 | sed 's/HTTP_STATUS://')
               body=$(echo "$response" | sed '/HTTP_STATUS:/d')
+              
+              echo "🔍 DEBUG: Parsed response:"
+              echo "   Status code: $status"
+              echo "   Body: $body"
+              echo ""
               
               if [[ "$status" == 2* ]]; then
                 echo "✅ HTTP health check successful (HTTP $status)"
@@ -252,6 +294,7 @@ jobs:
           done
           
           if [ "$success" = false ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ HTTP health check failed after $max_attempts attempts"
             echo ""
             echo "Troubleshooting steps:"
