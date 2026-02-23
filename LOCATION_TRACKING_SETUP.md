@@ -101,11 +101,29 @@ OwnTracks App → n8n Webhook → Filter & Transform → MCP Server → Notion/S
 
 #### On Your Server (VM/VPS)
 - **Ubuntu 20.04+** or similar Linux distribution
-- **Python 3.11+**
+- **Python 3.11+** (installation instructions below)
 - **Node.js 18+** (for n8n)
 - **npm or pnpm** (Node package manager)
 - **systemd** (for service management)
 - **sudo access** (for service setup)
+
+##### Python 3.11 Installation
+
+**For Ubuntu 20.04 users** (Python 3.11 isn't in default repositories):
+
+> **Note:** Ubuntu 20.04 requires the deadsnakes PPA to access Python 3.11, as it's not available in the default repositories.
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-distutils
+```
+
+**For Ubuntu 22.04+ users:**
+
+```bash
+sudo apt install -y python3.11 python3.11-venv
+```
 
 #### On Your Phone
 - **OwnTracks app**: [iOS](https://apps.apple.com/app/owntracks/id692424691) | [Android](https://play.google.com/store/apps/details?id=org.owntracks.android)
