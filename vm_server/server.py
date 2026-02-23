@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# Deployment: NUCLEAR OPTION - Respond to everything with 200 OK
+# Deployment: NUCLEAR OPTION with enhanced debugging
 import os
 import sys
 from pathlib import Path
+import json
 
 # Load environment variables from .env file
 try:
@@ -25,29 +26,47 @@ mcp = FastMCP(
 )
 original_app = mcp.http_app(stateless_http=True)
 
-# NUCLEAR OPTION: Respond to EVERYTHING with 200 OK
+# Enhanced nuclear option with logging and ANY path handling
 async def respond_to_everything(scope, receive, send):
-    """Nuclear option: respond to ALL requests with 200 OK for debugging."""
-    method = scope.get('method', 'UNKNOWN')
-    path = scope.get('path', 'UNKNOWN')
+    """
+    Enhanced nuclear option: responds to ANY request with detailed debug info
+    and logs the request for analysis
+    """
+    path = scope.get('path', '')
+    method = scope.get('method', '')
+    query_string = scope.get('query_string', b'').decode('utf-8')
     
-    debug_info = {
+    # Log incoming request to console/logs for debugging
+    print(f"🔍 NUCLEAR OPTION: Received {method} request for path: '{path}'")
+    if query_string:
+        print(f"🔍 NUCLEAR OPTION: Query string: '{query_string}'")
+    
+    # Create detailed debug response
+    debug_response = {
         "ok": True,
         "status": "healthy",
+        "nuclear_option": True,
         "debug": {
             "message": "NUCLEAR OPTION: Responding to ALL requests",
-            "received_method": method,
             "received_path": path,
-            "scope_type": scope.get('type', 'UNKNOWN'),
-            "query_string": scope.get('query_string', b'').decode('utf-8'),
-            "headers": {k.decode('utf-8'): v.decode('utf-8') for k, v in scope.get('headers', [])}
+            "received_method": method,
+            "scope_type": scope.get('type', ''),
+            "query_string": query_string,
+            "path_length": len(path),
+            "headers": {k.decode('utf-8'): v.decode('utf-8') 
+                       for k, v in scope.get('headers', [])},
+            "server_name": scope.get('server', ['unknown', 0])[0] if scope.get('server') else 'unknown',
+            "server_port": scope.get('server', ['unknown', 0])[1] if scope.get('server') else 'unknown'
         }
     }
     
-    response = JSONResponse(debug_info)
+    # Log the full response for debugging
+    print(f"🔍 NUCLEAR OPTION: Responding with: {json.dumps(debug_response, indent=2)}")
+    
+    response = JSONResponse(debug_response)
     await response(scope, receive, send)
 
-# Replace the entire app with nuclear option
+# Replace the entire app with enhanced nuclear option
 app = respond_to_everything
 
 register_tools(mcp)
