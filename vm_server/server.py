@@ -20,8 +20,8 @@ from tools.registry import register_tools
 
 mcp = FastMCP(
     "Lina Serendipity MCP Server",
-    stateless_http=True,
 )
+app = mcp.http_app(stateless_http=True)
 
 
 # Optional health endpoint for external checks.
