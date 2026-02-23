@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Deployment: Health check endpoint fixes deployed (PR #8)
 import os
 import sys
 from pathlib import Path
