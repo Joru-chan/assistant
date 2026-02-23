@@ -163,10 +163,44 @@ jobs:
               sudo systemctl status ${{ secrets.VM_SERVICE }} && \
               exit 1)"
 
-      - name: MCP health check
+      - name: Construct and validate health check URL
+        id: health_url
         run: |
-          echo "🏥 Running MCP health check..."
-          echo "🔍 Debug: MCP URL being used: ${{ secrets.VMMCPURL }}"
+          echo "🔍 Constructing health check URL from VMMCPURL..."
+          BASE_URL="${{ secrets.VMMCPURL }}"
+          
+          # Check if BASE_URL is empty
+          if [ -z "$BASE_URL" ]; then
+            echo "❌ VMMCPURL secret is empty or not set"
+            echo "Please configure the VMMCPURL secret in repository settings"
+            exit 1
+          fi
+          
+          # Remove trailing slashes
+          BASE_URL=$(echo "$BASE_URL" | sed 's:/*$::')
+          
+          # Check if URL starts with http:// or https://
+          if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
+            echo "❌ Invalid URL format: $BASE_URL"
+            echo "VMMCPURL must start with http:// or https://"
+            exit 1
+          fi
+          
+          # Construct health check URL
+          HEALTH_URL="${BASE_URL}/health"
+          
+          echo "✅ Base URL (VMMCPURL): $BASE_URL"
+          echo "✅ Health check URL: $HEALTH_URL"
+          echo ""
+          
+          # Export for next step
+          echo "HEALTH_URL=$HEALTH_URL" >> $GITHUB_OUTPUT
+
+      - name: HTTP health check
+        run: |
+          echo "🏥 Running HTTP health check..."
+          HEALTH_URL="${{ steps.health_url.outputs.HEALTH_URL }}"
+          echo "🔍 Health URL: $HEALTH_URL"
           echo ""
           
           max_attempts=10
@@ -177,51 +211,56 @@ jobs:
             attempt=$((attempt + 1))
             echo "Attempt $attempt/$max_attempts..."
             
-            response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
-              -H "Content-Type: application/json" \
-              -H "Accept: application/json, text/event-stream" \
-              -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"health_check","arguments":{}}}' \
-              "${{ secrets.VMMCPURL }}" || echo "HTTP_STATUS:000")
+            # Use -f to fail on HTTP errors, capture both body and status
+            response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" "$HEALTH_URL" 2>&1 || echo "CURL_ERROR:$?
+HTTP_STATUS:000")
             
-            status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
-            body=$(echo "$response" | sed '$d')
-            
-            if [[ "$status" == 2* ]]; then
-              echo "✅ MCP health check successful (HTTP $status)"
-              echo "Response: $(echo "$body" | head -n1)"
-              success=true
-              break
-            else
-              echo "⚠️  MCP returned status $status"
-              if [ $attempt -lt $max_attempts ]; then
-                echo "Retrying in 2 seconds..."
-                sleep 2
+            # Check if curl itself failed
+            if echo "$response" | grep -q "CURL_ERROR:"; then
+              curl_error=$(echo "$response" | grep "CURL_ERROR:" | cut -d: -f2)
+              echo "❌ Curl failed with exit code $curl_error"
+              if echo "$response" | grep -q "URL rejected"; then
+                echo "❌ URL is malformed: $HEALTH_URL"
+                echo "Please check the VMMCPURL secret configuration"
+                echo "Current value (sanitized): ${{ secrets.VMMCPURL }}"
+                exit 1
               fi
+              if echo "$response" | grep -q "Could not resolve host"; then
+                echo "❌ Cannot resolve hostname in URL"
+                echo "Please verify the hostname/IP in VMMCPURL is correct"
+              fi
+            else
+              status=$(echo "$response" | grep "HTTP_STATUS:" | tail -n1 | sed 's/HTTP_STATUS://')
+              body=$(echo "$response" | sed '/HTTP_STATUS:/d')
+              
+              if [[ "$status" == 2* ]]; then
+                echo "✅ HTTP health check successful (HTTP $status)"
+                echo "Response: $(echo "$body" | head -n1)"
+                success=true
+                break
+              else
+                echo "⚠️  Server returned status $status"
+                if [ -n "$body" ]; then
+                  echo "Response body: $(echo "$body" | head -n3)"
+                fi
+              fi
+            fi
+            
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Retrying in 3 seconds..."
+              sleep 3
             fi
           done
           
           if [ "$success" = false ]; then
-            echo "❌ MCP health check failed after $max_attempts attempts"
-            exit 1
-          fi
-
-      - name: HTTP health check (fallback)
-        if: failure()
-        run: |
-          echo "🏥 Running HTTP health check (fallback)..."
-          
-          response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
-            "${{ secrets.VM_HEALTH_URL }}" || echo "HTTP_STATUS:000")
-          
-          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
-          body=$(echo "$response" | sed '$d')
-          
-          if [[ "$status" == 2* ]]; then
-            echo "✅ HTTP health check successful (HTTP $status)"
-            echo "Response: $body"
-          else
-            echo "❌ HTTP health check failed (HTTP $status)"
-            echo "Response: $body"
+            echo "❌ HTTP health check failed after $max_attempts attempts"
+            echo ""
+            echo "Troubleshooting steps:"
+            echo "1. Check if the service is running: sudo systemctl status ${{ secrets.VM_SERVICE }}"
+            echo "2. Check service logs: sudo journalctl -u ${{ secrets.VM_SERVICE }} -n 50"
+            echo "3. Verify the health endpoint is accessible: curl -v $HEALTH_URL"
+            echo "4. Check if port is listening: sudo netstat -tlnp | grep :8000"
+            echo "5. Verify VMMCPURL is set correctly: ${{ secrets.VMMCPURL }}"
             exit 1
           fi
 
@@ -242,7 +281,7 @@ jobs:
           echo "📂 Directory: ${{ secrets.VMDEST_DIR }}"
           echo "🔧 Service: ${{ secrets.VM_SERVICE }}"
           echo "🌐 MCP URL: ${{ secrets.VMMCPURL }}"
-          echo "💚 Health URL: ${{ secrets.VM_HEALTH_URL }}"
+          echo "💚 Health URL: ${{ steps.health_url.outputs.HEALTH_URL }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Deployment failure notice
