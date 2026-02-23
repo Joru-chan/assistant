@@ -163,6 +163,101 @@ jobs:
               sudo systemctl status ${{ secrets.VM_SERVICE }} && \
               exit 1)"
 
+      - name: Debug - Service detailed status
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: Detailed Service Status"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo '🔍 Service status:'; \
+             sudo systemctl status ${{ secrets.VM_SERVICE }} || true; \
+             echo ''; \
+             echo '🔍 Service is-active status:'; \
+             sudo systemctl is-active ${{ secrets.VM_SERVICE }} || true; \
+             echo ''; \
+             echo '🔍 Service is-enabled status:'; \
+             sudo systemctl is-enabled ${{ secrets.VM_SERVICE }} || true"
+
+      - name: Debug - Service logs
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: Service Logs (Last 50 lines)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "sudo journalctl -u ${{ secrets.VM_SERVICE }} -n 50 --no-pager || true"
+
+      - name: Debug - Listening ports
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: Listening Ports"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo 'All listening TCP ports:'; \
+             sudo netstat -tlnp | grep LISTEN || true; \
+             echo ''; \
+             echo 'Specifically checking port 8000:'; \
+             sudo netstat -tlnp | grep :8000 || echo '❌ No process listening on port 8000'; \
+             echo ''; \
+             echo 'Using ss command (alternative):'; \
+             sudo ss -tlnp | grep :8000 || echo '❌ Port 8000 not found with ss'"
+
+      - name: Debug - Process list
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: Python Processes"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo 'Python processes:'; \
+             ps aux | head -1; \
+             ps aux | grep python | grep -v grep || echo '❌ No python processes found'; \
+             echo ''; \
+             echo '🔍 All processes with server in name:'; \
+             ps aux | grep -i server | grep -v grep || echo '❌ No server processes found'; \
+             echo ''; \
+             echo '🔍 Processes on port 8000:'; \
+             sudo lsof -i :8000 || echo '❌ No processes on port 8000'"
+
+      - name: Debug - Local connectivity test
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: Local Connectivity Test"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "echo 'Testing localhost:8000/health...'; \
+             curl -v --connect-timeout 5 http://localhost:8000/health 2>&1 || echo '❌ localhost:8000 failed'; \
+             echo ''; \
+             echo 'Testing 127.0.0.1:8000/health...'; \
+             curl -v --connect-timeout 5 http://127.0.0.1:8000/health 2>&1 || echo '❌ 127.0.0.1:8000 failed'; \
+             echo ''; \
+             echo 'Testing basic port connection:'; \
+             nc -zv localhost 8000 2>&1 || echo '❌ Port 8000 not reachable'; \
+             echo ''; \
+             echo 'Testing with telnet:'; \
+             timeout 2 telnet localhost 8000 2>&1 || echo '❌ Telnet failed'"
+
+      - name: Debug - VMMCPURL format check
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔍 DEBUG: VMMCPURL Format Analysis"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          VM_URL="${{ secrets.VMMCPURL }}"
+          echo "URL length: ${#VM_URL} characters"
+          echo "URL pattern: $(echo "$VM_URL" | sed 's/[0-9]/X/g; s/[a-z]/x/g; s/[A-Z]/X/g')"
+          echo "Starts with http: $(echo "$VM_URL" | grep -q '^http' && echo 'YES' || echo 'NO')"
+          echo "Contains port: $(echo "$VM_URL" | grep -q ':' && echo 'YES' || echo 'NO')"
+          echo "Has trailing slash: $(echo "$VM_URL" | grep -q '/$' && echo 'YES' || echo 'NO')"
+
       - name: Construct and validate health check URL
         id: health_url
         run: |
