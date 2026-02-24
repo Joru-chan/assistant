@@ -9,7 +9,7 @@ on:
       wait_time:
         description: 'Seconds to wait for server startup'
         required: false
-        default: '10'
+        default: '15'
         type: string
 
 jobs:
@@ -98,37 +98,161 @@ jobs:
           print("\n✅ All critical dependencies verified!")
           EOF
       
-      - name: 🚀 Start server in background
+      - name: 🚀 Start server in background with MAXIMUM VERBOSITY
         run: |
           cd vm_server
           echo "===================================="
-          echo "Starting server with hardcoded fallbacks..."
-          echo "No environment variables set (testing fallbacks)"
+          echo "🔍 STARTING SERVER WITH MAXIMUM DEBUG OUTPUT"
+          echo "===================================="
+          echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo "Working directory: $(pwd)"
+          echo "Python: $(which python)"
+          echo "Python version: $(python --version)"
+          echo ""
+          
+          echo "===================================="
+          echo "📝 Creating startup wrapper script..."
           echo "===================================="
           
-          # Start server in background, capturing output to file
-          nohup python server.py > server.log 2>&1 &
+          # Create a wrapper script for maximum debugging
+          cat > start_server.sh << 'WRAPPER_EOF'
+          #!/bin/bash
+          set -x  # Print commands as they execute
+          
+          echo "=========================================="
+          echo "🚀 SERVER STARTUP WRAPPER"
+          echo "=========================================="
+          echo "Start time: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo "PID: $$"
+          echo "Working directory: $(pwd)"
+          echo ""
+          
+          echo "=========================================="
+          echo "🔍 Pre-startup checks..."
+          echo "=========================================="
+          echo "server.py exists: $(test -f server.py && echo 'YES' || echo 'NO')"
+          echo "server.py size: $(stat -f%z server.py 2>/dev/null || stat -c%s server.py 2>/dev/null || echo 'unknown') bytes"
+          echo "server.py permissions: $(ls -l server.py)"
+          echo ""
+          
+          echo "=========================================="
+          echo "🐍 Starting Python with VERBOSE flags..."
+          echo "=========================================="
+          echo "Flags: -u (unbuffered) -v (verbose imports)"
+          echo "Capturing both stdout and stderr"
+          echo "Start time: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo ""
+          
+          # Run Python with maximum verbosity
+          # -u: unbuffered output (immediate)
+          # -v: verbose import messages
+          # 2>&1: capture both stdout and stderr
+          python -u server.py 2>&1
+          
+          # Capture exit code
+          EXIT_CODE=$?
+          
+          echo ""
+          echo "=========================================="
+          echo "💥 PYTHON PROCESS EXITED"
+          echo "=========================================="
+          echo "Exit time: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo "Exit code: $EXIT_CODE"
+          echo ""
+          
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "❌ SERVER FAILED TO START (exit code $EXIT_CODE)"
+          else
+            echo "✅ SERVER EXITED CLEANLY (exit code 0)"
+          fi
+          
+          exit $EXIT_CODE
+          WRAPPER_EOF
+          
+          chmod +x start_server.sh
+          
+          echo "✅ Wrapper script created"
+          echo ""
+          
+          echo "===================================="
+          echo "🏃 Launching server in background..."
+          echo "===================================="
+          
+          # Run wrapper in background, capturing ALL output
+          nohup ./start_server.sh > server.log 2>&1 &
           SERVER_PID=$!
+          
           echo "Server PID: $SERVER_PID"
           echo $SERVER_PID > server.pid
           
           echo ""
-          echo "Server started in background, PID: $SERVER_PID"
+          echo "✅ Server launch initiated"
+          echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S.%N')"
       
-      - name: ⏳ Wait for server startup
+      - name: ⏳ Wait for server startup with live monitoring
         run: |
-          WAIT_TIME=${{ inputs.wait_time || '10' }}
-          echo "===================================="
-          echo "Waiting ${WAIT_TIME} seconds for server to start..."
-          echo "===================================="
+          cd vm_server
+          WAIT_TIME=${{ inputs.wait_time || '15' }}
+          SERVER_PID=$(cat server.pid)
           
-          # Wait and show progress
+          echo "===================================="
+          echo "⏱️  Monitoring server startup..."
+          echo "===================================="
+          echo "Wait time: ${WAIT_TIME} seconds"
+          echo "Server PID: $SERVER_PID"
+          echo "Start time: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo ""
+          
+          # Monitor the server while waiting
           for i in $(seq 1 $WAIT_TIME); do
-            echo -n "."
+            # Check if process still exists
+            if ! ps -p $SERVER_PID > /dev/null 2>&1; then
+              echo ""
+              echo "❌ Process $SERVER_PID exited early (after $i seconds)!"
+              echo "Checking exit code..."
+              
+              # Get exit code if available (from wait)
+              wait $SERVER_PID 2>/dev/null
+              EXIT_CODE=$?
+              echo "Exit code: $EXIT_CODE"
+              break
+            fi
+            
+            # Show progress and process info every 5 seconds
+            if [ $((i % 5)) -eq 0 ]; then
+              echo "[${i}s] Process status:"
+              ps -o pid,ppid,stat,time,cmd -p $SERVER_PID 2>/dev/null || echo "  Process not found"
+            else
+              echo -n "."
+            fi
+            
             sleep 1
           done
+          
           echo ""
-          echo "Wait complete!"
+          echo "Wait complete at: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+      
+      - name: 🔍 Show server logs IMMEDIATELY (first look)
+        if: always()
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "📊 INITIAL SERVER OUTPUT"
+          echo "===================================="
+          echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo ""
+          
+          if [ -f server.log ]; then
+            echo "Log file size: $(stat -f%z server.log 2>/dev/null || stat -c%s server.log 2>/dev/null || echo 'unknown') bytes"
+            echo "Log file lines: $(wc -l < server.log)"
+            echo ""
+            echo "First 100 lines of output:"
+            echo "----------------------------------------"
+            head -n 100 server.log || cat server.log
+            echo "----------------------------------------"
+          else
+            echo "❌ No server.log file found!"
+          fi
       
       - name: ✅ Check server process is running
         id: check_process
@@ -137,69 +261,138 @@ jobs:
           SERVER_PID=$(cat server.pid)
           
           echo "===================================="
-          echo "Checking if server process is still alive..."
+          echo "🔍 Process Status Check"
           echo "===================================="
+          echo "Checking PID: $SERVER_PID"
+          echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo ""
           
-          if ps -p $SERVER_PID > /dev/null; then
-            echo "✅ SUCCESS: Server process $SERVER_PID is RUNNING!"
+          # Detailed process check
+          if ps -p $SERVER_PID > /dev/null 2>&1; then
+            echo "✅ SUCCESS: Process $SERVER_PID is RUNNING!"
+            echo ""
+            echo "Process details:"
+            ps -o pid,ppid,stat,time,vsz,rss,cmd -p $SERVER_PID
+            echo ""
+            echo "Process tree:"
+            pstree -p $SERVER_PID 2>/dev/null || echo "(pstree not available)"
+            echo ""
             echo "status=running" >> $GITHUB_OUTPUT
             exit 0
           else
-            echo "❌ FAILED: Server process $SERVER_PID has EXITED!"
+            echo "❌ FAILED: Process $SERVER_PID has EXITED!"
+            echo ""
+            
+            # Try to get exit reason
+            echo "Searching for exit information in logs..."
+            if grep -q "Exit code:" server.log; then
+              echo ""
+              echo "Found exit code information:"
+              grep -A 5 "Exit code:" server.log
+            fi
+            
+            echo ""
             echo "status=exited" >> $GITHUB_OUTPUT
             exit 1
           fi
       
-      - name: 📊 Show server startup logs
+      - name: 📊 Show COMPLETE server startup logs
         if: always()
         run: |
           cd vm_server
           echo "===================================="
-          echo "SERVER STARTUP LOGS:"
+          echo "📜 COMPLETE SERVER STARTUP LOGS"
           echo "===================================="
+          echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+          echo ""
+          
           if [ -f server.log ]; then
+            echo "Log file size: $(stat -f%z server.log 2>/dev/null || stat -c%s server.log 2>/dev/null || echo 'unknown') bytes"
+            echo "Log file lines: $(wc -l < server.log)"
+            echo ""
+            echo "===================================="
+            echo "FULL LOG OUTPUT:"
+            echo "===================================="
             cat server.log
+            echo "===================================="
+            echo "END OF LOG OUTPUT"
+            echo "===================================="
           else
             echo "❌ No server.log file found!"
           fi
-          echo "===================================="
       
-      - name: 🔍 Check for startup configuration display
+      - name: 🔍 Analyze server logs for errors
         if: always()
         run: |
           cd vm_server
           echo "===================================="
-          echo "Checking for configuration display..."
+          echo "🔬 Log Analysis"
           echo "===================================="
           
-          if grep -q "Lina Serendipity MCP Server Starting" server.log; then
-            echo "✅ Found server startup banner"
-          else
-            echo "⚠️  No startup banner found"
+          if [ ! -f server.log ]; then
+            echo "❌ No log file to analyze"
+            exit 0
           fi
           
-          if grep -q "Secrets Status:" server.log; then
-            echo "✅ Found secrets status display"
-          else
-            echo "⚠️  No secrets status found"
-          fi
+          echo ""
+          echo "📊 Log Statistics:"
+          echo "  Total lines: $(wc -l < server.log)"
+          echo "  File size: $(stat -f%z server.log 2>/dev/null || stat -c%s server.log 2>/dev/null || echo 'unknown') bytes"
+          echo ""
           
-          if grep -q "hardcoded" server.log; then
-            echo "✅ Found hardcoded fallback indicators"
-          else
-            echo "⚠️  No hardcoded indicators found"
-          fi
+          # Check for startup milestones
+          echo "🎯 Startup Milestones:"
+          grep -q "DEBUG: Starting server imports" server.log && echo "  ✅ Import phase started" || echo "  ❌ Import phase NOT reached"
+          grep -q "DEBUG: All imports complete" server.log && echo "  ✅ Imports completed" || echo "  ❌ Imports NOT completed"
+          grep -q "DEBUG: Loading configuration" server.log && echo "  ✅ Configuration loading started" || echo "  ❌ Configuration NOT started"
+          grep -q "DEBUG: Configuration loaded" server.log && echo "  ✅ Configuration loaded" || echo "  ❌ Configuration NOT loaded"
+          grep -q "DEBUG: Registering tools" server.log && echo "  ✅ Tool registration started" || echo "  ❌ Tool registration NOT started"
+          grep -q "Tools registered successfully" server.log && echo "  ✅ Tools registered" || echo "  ❌ Tools NOT registered"
+          grep -q "DEBUG: Starting mcp.run" server.log && echo "  ✅ Server run started" || echo "  ❌ Server run NOT started"
+          grep -q "Uvicorn running on" server.log && echo "  ✅ Uvicorn started" || echo "  ❌ Uvicorn NOT started"
+          echo ""
           
-          if grep -q "Tools registered successfully" server.log; then
-            echo "✅ Tools registered successfully"
+          # Check for errors
+          echo "❌ Error Detection:"
+          if grep -qi "error" server.log; then
+            echo "  ⚠️  Found error messages:"
+            grep -i "error" server.log | head -n 10
           else
-            echo "⚠️  Tool registration message not found"
+            echo "  ✅ No error messages found"
           fi
+          echo ""
           
-          if grep -q "Uvicorn running on" server.log; then
-            echo "✅ Uvicorn started successfully"
+          if grep -qi "traceback" server.log; then
+            echo "  ⚠️  Found tracebacks:"
+            grep -A 20 -i "traceback" server.log | head -n 50
           else
-            echo "⚠️  Uvicorn startup message not found"
+            echo "  ✅ No tracebacks found"
+          fi
+          echo ""
+          
+          if grep -qi "ModuleNotFoundError" server.log; then
+            echo "  ❌ ModuleNotFoundError detected:"
+            grep -B 3 -A 10 "ModuleNotFoundError" server.log
+            exit 1
+          else
+            echo "  ✅ No ModuleNotFoundError"
+          fi
+          echo ""
+          
+          if grep -qi "ImportError" server.log; then
+            echo "  ❌ ImportError detected:"
+            grep -B 3 -A 10 "ImportError" server.log
+            exit 1
+          else
+            echo "  ✅ No ImportError"
+          fi
+          echo ""
+          
+          if grep -qi "exit code: 1" server.log; then
+            echo "  ❌ Exit code 1 detected!"
+            grep -B 10 -A 5 "exit code: 1" server.log
+          else
+            echo "  ✅ No exit code 1 found"
           fi
       
       - name: 🏥 Attempt health check
@@ -207,64 +400,41 @@ jobs:
         continue-on-error: true
         run: |
           echo "===================================="
-          echo "Attempting to connect to server..."
+          echo "🏥 Health Check Attempt"
           echo "===================================="
           
-          # Give server a moment to bind to port
-          sleep 2
+          # Give server more time to bind
+          echo "Waiting 3 seconds for port binding..."
+          sleep 3
           
-          # Try to connect to port 8000
-          if curl -f -s --max-time 5 http://localhost:8000/ > /dev/null 2>&1; then
-            echo "✅ Server responding on port 8000"
-            
-            # Try to get response
-            echo ""
-            echo "Server root response:"
-            curl -s http://localhost:8000/ || echo "(No response body)"
+          echo ""
+          echo "Checking port 8000..."
+          if netstat -tln 2>/dev/null | grep -q ":8000 "; then
+            echo "✅ Port 8000 is listening"
           else
-            echo "⚠️  Could not connect to port 8000 (this may be expected)"
-            echo "   MCP servers may not respond to root path"
+            echo "⚠️  Port 8000 not found in netstat"
           fi
           
-          # Try MCP endpoint
-          if curl -f -s --max-time 5 http://localhost:8000/mcp > /dev/null 2>&1; then
-            echo "✅ Server responding on /mcp endpoint"
-          else
-            echo "⚠️  Could not connect to /mcp endpoint"
-          fi
-      
-      - name: 🔍 Check for errors in logs
-        if: always()
-        run: |
-          cd vm_server
-          echo "===================================="
-          echo "Checking for errors in logs..."
-          echo "===================================="
+          echo ""
+          echo "Attempting HTTP connection..."
           
-          if grep -i "error" server.log; then
-            echo "⚠️  Found error messages in logs (see above)"
+          # Try root endpoint
+          if timeout 5 curl -f -s http://localhost:8000/ > /tmp/root_response 2>&1; then
+            echo "✅ Server responding on root /"
+            echo "Response:"
+            cat /tmp/root_response
           else
-            echo "✅ No error messages found in logs"
+            echo "⚠️  No response from root / (this may be expected for MCP servers)"
           fi
           
-          if grep -i "traceback" server.log; then
-            echo "⚠️  Found traceback in logs (see above)"
+          echo ""
+          # Try MCP endpoint  
+          if timeout 5 curl -f -s http://localhost:8000/mcp > /tmp/mcp_response 2>&1; then
+            echo "✅ Server responding on /mcp"
+            echo "Response:"
+            cat /tmp/mcp_response
           else
-            echo "✅ No tracebacks found in logs"
-          fi
-          
-          if grep -i "ModuleNotFoundError" server.log; then
-            echo "❌ Found ModuleNotFoundError in logs"
-            exit 1
-          else
-            echo "✅ No ModuleNotFoundError found"
-          fi
-          
-          if grep -i "ImportError" server.log; then
-            echo "❌ Found ImportError in logs"
-            exit 1
-          else
-            echo "✅ No ImportError found"
+            echo "⚠️  No response from /mcp endpoint"
           fi
       
       - name: 📈 Show process info
@@ -274,10 +444,17 @@ jobs:
           if [ -f server.pid ]; then
             SERVER_PID=$(cat server.pid)
             echo "===================================="
-            echo "Process information for PID $SERVER_PID:"
+            echo "📊 Process Information"
             echo "===================================="
+            echo "PID: $SERVER_PID"
+            echo ""
             ps aux | head -1
-            ps aux | grep $SERVER_PID | grep -v grep || echo "Process not found"
+            ps aux | grep $SERVER_PID | grep -v grep || echo "Process not found (already exited)"
+            echo ""
+            
+            # Show any remaining python processes
+            echo "Other Python processes:"
+            ps aux | grep python | grep -v grep || echo "None"
           fi
       
       - name: 🧹 Cleanup - Stop server
@@ -287,12 +464,30 @@ jobs:
           if [ -f server.pid ]; then
             SERVER_PID=$(cat server.pid)
             echo "===================================="
-            echo "Stopping server (PID: $SERVER_PID)..."
+            echo "🧹 Cleanup"
             echo "===================================="
-            kill $SERVER_PID 2>/dev/null || echo "Process already stopped"
-            sleep 2
-            # Force kill if still running
-            kill -9 $SERVER_PID 2>/dev/null || echo "Process terminated"
+            echo "Stopping server PID: $SERVER_PID"
+            
+            if ps -p $SERVER_PID > /dev/null 2>&1; then
+              echo "Sending SIGTERM..."
+              kill $SERVER_PID 2>/dev/null || true
+              sleep 2
+              
+              if ps -p $SERVER_PID > /dev/null 2>&1; then
+                echo "Process still alive, sending SIGKILL..."
+                kill -9 $SERVER_PID 2>/dev/null || true
+                sleep 1
+              fi
+              
+              if ps -p $SERVER_PID > /dev/null 2>&1; then
+                echo "⚠️  Process still running!"
+              else
+                echo "✅ Process terminated"
+              fi
+            else
+              echo "Process already stopped"
+            fi
+            
             echo "✅ Cleanup complete"
           fi
       
@@ -301,7 +496,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-logs-python-${{ matrix.python-version }}
-          path: vm_server/server.log
+          path: |
+            vm_server/server.log
+            vm_server/start_server.sh
           retention-days: 7
 
   summary:
@@ -316,35 +513,27 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Branch: debug-hardcoded-secrets" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This workflow tests that the server starts successfully with:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ All dependencies properly declared in requirements.txt" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Hardcoded fallback values for all environment variables" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Normal FastMCP routing (NUCLEAR OPTION removed)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ No exit code 1 failures" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## What This Tests" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- 🐍 Multiple Python versions (3.9, 3.10, 3.11)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 Dependency installation from requirements.txt" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔧 Critical imports (uvicorn, starlette, dotenv)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🚀 Server startup without environment variables" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏱️ Server stays alive (no immediate crash)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 Configuration display with hardcoded indicators" >> $GITHUB_STEP_SUMMARY
-          echo "- 🛠️ Tool registration success" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow tests server startup with MAXIMUM DEBUG OUTPUT:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔍 Python -u (unbuffered) and -v (verbose imports) flags" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Complete stdout/stderr capture" >> $GITHUB_STEP_SUMMARY
+          echo "- ⏱️ Timing information at every step" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐛 Detailed error tracebacks" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Process status monitoring" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 Startup milestone tracking" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Expected Behavior" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Success Criteria:**" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Success:**" >> $GITHUB_STEP_SUMMARY
           echo "- Server process starts and stays running" >> $GITHUB_STEP_SUMMARY
+          echo "- All startup milestones reached" >> $GITHUB_STEP_SUMMARY
           echo "- No ModuleNotFoundError or ImportError" >> $GITHUB_STEP_SUMMARY
-          echo "- Startup logs show configuration with 'hardcoded' indicators" >> $GITHUB_STEP_SUMMARY
-          echo "- Tools register successfully" >> $GITHUB_STEP_SUMMARY
-          echo "- Uvicorn starts and binds to port 8000" >> $GITHUB_STEP_SUMMARY
+          echo "- Uvicorn starts successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "❌ **If Tests Fail:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Check server logs artifact for error details" >> $GITHUB_STEP_SUMMARY
-          echo "- Look for import errors → dependency issue" >> $GITHUB_STEP_SUMMARY
-          echo "- Look for syntax errors → code issue" >> $GITHUB_STEP_SUMMARY
-          echo "- Look for runtime errors → logic issue" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Failure:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Download server logs to see EXACT failure point" >> $GITHUB_STEP_SUMMARY
+          echo "- Check 'Log Analysis' step for milestone progress" >> $GITHUB_STEP_SUMMARY
+          echo "- Review complete traceback in logs" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📥 Download server logs from the 'Artifacts' section above for detailed debugging." >> $GITHUB_STEP_SUMMARY
+          echo "📥 **Artifacts contain:**" >> $GITHUB_STEP_SUMMARY
+          echo "- server.log: Complete server output with all debug info" >> $GITHUB_STEP_SUMMARY
+          echo "- start_server.sh: Wrapper script used to launch server" >> $GITHUB_STEP_SUMMARY
