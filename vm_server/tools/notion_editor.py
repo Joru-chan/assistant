@@ -9,6 +9,12 @@ from fastmcp import FastMCP
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
+# HARDCODED FALLBACK for debugging (DO NOT USE IN PRODUCTION!)
+DEBUG_NOTION_TOKEN = "debug-notion-token-12345"
+
+def _get_notion_token() -> str:
+    """Get Notion token with hardcoded fallback for debugging."""
+    return os.getenv("NOTION_TOKEN", DEBUG_NOTION_TOKEN)
 
 def _headers(token: str) -> Dict[str, str]:
     return {
@@ -146,6 +152,16 @@ def _build_property_update(
     return None
 
 
+async def _fetch_page(
+    client: httpx.AsyncClient, token: str, page_id: str
+) -> Dict[str, Any]:
+    url = f"{NOTION_API_BASE}/pages/{page_id}"
+    resp = await client.get(url, headers=_headers(token))
+    if resp.status_code >= 400:
+        raise RuntimeError(_notion_error_message(resp))
+    return resp.json()
+
+
 def _build_blocks(append_blocks: List[Dict[str, Any]], errors: List[str]) -> List[Dict[str, Any]]:
     blocks = []
     for block in append_blocks:
@@ -166,23 +182,22 @@ def _build_blocks(append_blocks: List[Dict[str, Any]], errors: List[str]) -> Lis
     return blocks
 
 
-async def _fetch_page(
-    client: httpx.AsyncClient, token: str, page_id: str
-) -> Dict[str, Any]:
-    url = f"{NOTION_API_BASE}/pages/{page_id}"
-    resp = await client.get(url, headers=_headers(token))
-    if resp.status_code >= 400:
-        raise RuntimeError(_notion_error_message(resp))
-    return resp.json()
-
-
 def register(mcp: FastMCP) -> None:
     @mcp.tool
     async def notion_search(query: str, limit: int = 10) -> dict:
         errors: List[str] = []
-        token = os.getenv("NOTION_TOKEN")
-        if not token:
-            errors.append("NOTION_TOKEN is not set on the server.")
+        token = _get_notion_token()
+        
+        # Check if using debug token
+        if token == DEBUG_NOTION_TOKEN:
+            errors.append("⚠️  Using DEBUG Notion token - set NOTION_TOKEN environment variable for real API access")
+            return {
+                "summary": "Notion search unavailable in debug mode.",
+                "result": {"items": [], "debug_mode": True},
+                "next_actions": ["Set NOTION_TOKEN environment variable to enable Notion integration."],
+                "errors": errors,
+            }
+        
         if not query:
             errors.append("Query is required.")
         if errors:
@@ -244,9 +259,18 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     async def notion_get_page(page_id: str) -> dict:
         errors: List[str] = []
-        token = os.getenv("NOTION_TOKEN")
-        if not token:
-            errors.append("NOTION_TOKEN is not set on the server.")
+        token = _get_notion_token()
+        
+        # Check if using debug token
+        if token == DEBUG_NOTION_TOKEN:
+            errors.append("⚠️  Using DEBUG Notion token - set NOTION_TOKEN environment variable for real API access")
+            return {
+                "summary": "Notion page fetch unavailable in debug mode.",
+                "result": {"page": None, "debug_mode": True},
+                "next_actions": ["Set NOTION_TOKEN environment variable to enable Notion integration."],
+                "errors": errors,
+            }
+        
         if not page_id:
             errors.append("page_id is required.")
         if errors:
@@ -284,9 +308,18 @@ def register(mcp: FastMCP) -> None:
         dry_run: bool = True,
     ) -> dict:
         errors: List[str] = []
-        token = os.getenv("NOTION_TOKEN")
-        if not token:
-            errors.append("NOTION_TOKEN is not set on the server.")
+        token = _get_notion_token()
+        
+        # Check if using debug token
+        if token == DEBUG_NOTION_TOKEN:
+            errors.append("⚠️  Using DEBUG Notion token - set NOTION_TOKEN environment variable for real API access")
+            return {
+                "summary": "Notion update unavailable in debug mode.",
+                "result": {"debug_mode": True},
+                "next_actions": ["Set NOTION_TOKEN environment variable to enable Notion integration."],
+                "errors": errors,
+            }
+        
         if not page_id:
             errors.append("page_id is required.")
         if not isinstance(updates, dict):
