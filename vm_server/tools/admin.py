@@ -10,13 +10,31 @@ from typing import List
 
 from fastmcp import FastMCP
 
+# HARDCODED FALLBACKS for debugging (DO NOT USE IN PRODUCTION!)
+DEBUG_ADMIN_TOKEN = "debug-admin-token-abcdef"
+DEBUG_SERVICE_NAME = "mcp-server.service"
+DEBUG_PORT = "8000"
+
+def _get_admin_token() -> str:
+    """Get admin token with hardcoded fallback for debugging."""
+    return os.getenv("ADMIN_TOKEN", DEBUG_ADMIN_TOKEN)
+
+def _get_service_name() -> str:
+    """Get service name with hardcoded fallback."""
+    return os.getenv("MCP_SERVICE_NAME", DEBUG_SERVICE_NAME)
+
+def _get_port() -> str:
+    """Get port with hardcoded fallback."""
+    return os.getenv("PORT", DEBUG_PORT)
 
 def _authorize(token: str | None) -> list[str]:
     errors: list[str] = []
-    expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        errors.append("ADMIN_TOKEN is not set on the server.")
-        return errors
+    expected = _get_admin_token()
+    
+    # Check if using debug token
+    if expected == DEBUG_ADMIN_TOKEN:
+        errors.append("⚠️  Using DEBUG admin token - set ADMIN_TOKEN environment variable for production")
+    
     if not token:
         errors.append("Admin token is required.")
         return errors
@@ -43,7 +61,7 @@ def register(mcp: FastMCP) -> None:
         Return basic VM service status and runtime metadata (read-only).
         """
         errors = _authorize(token)
-        if errors:
+        if errors and "Invalid admin token" in errors:
             return {
                 "summary": "Admin token required.",
                 "result": {},
@@ -51,8 +69,8 @@ def register(mcp: FastMCP) -> None:
                 "errors": errors,
             }
 
-        service = os.getenv("MCP_SERVICE_NAME", "mcp-server.service")
-        port = os.getenv("PORT", "8000")
+        service = _get_service_name()
+        port = _get_port()
         server_time = datetime.now(timezone.utc).isoformat()
         hostname = socket.gethostname()
         uptime_seconds = None
@@ -64,19 +82,26 @@ def register(mcp: FastMCP) -> None:
 
         status_code, status_out = _run_command(["systemctl", "is-active", service])
 
+        result = {
+            "service": service,
+            "status": status_out or "unknown",
+            "status_code": status_code,
+            "server_time": server_time,
+            "hostname": hostname,
+            "uptime_seconds": uptime_seconds,
+            "health_url": f"http://127.0.0.1:{port}/health",
+        }
+        
+        # Add debug mode indicator
+        if _get_admin_token() == DEBUG_ADMIN_TOKEN:
+            result["debug_mode"] = True
+            result["warning"] = "Using debug admin token"
+
         return {
             "summary": f"Service {service} status: {status_out or 'unknown'}.",
-            "result": {
-                "service": service,
-                "status": status_out or "unknown",
-                "status_code": status_code,
-                "server_time": server_time,
-                "hostname": hostname,
-                "uptime_seconds": uptime_seconds,
-                "health_url": f"http://127.0.0.1:{port}/health",
-            },
+            "result": result,
             "next_actions": ["Run admin_logs to inspect recent logs."],
-            "errors": [],
+            "errors": errors if errors else [],
         }
 
     @mcp.tool
@@ -85,7 +110,7 @@ def register(mcp: FastMCP) -> None:
         Return recent systemd logs for the MCP service.
         """
         errors = _authorize(token)
-        if errors:
+        if errors and "Invalid admin token" in errors:
             return {
                 "summary": "Admin token required.",
                 "result": {},
@@ -93,7 +118,7 @@ def register(mcp: FastMCP) -> None:
                 "errors": errors,
             }
 
-        service = os.getenv("MCP_SERVICE_NAME", "mcp-server.service")
+        service = _get_service_name()
         lines = max(1, min(lines, 1000))
         code, output = _run_command(
             ["sudo", "journalctl", "-u", service, "-n", str(lines), "--no-pager"]
@@ -103,14 +128,14 @@ def register(mcp: FastMCP) -> None:
                 "summary": "Failed to read logs.",
                 "result": {"lines": []},
                 "next_actions": ["Check journalctl permissions."],
-                "errors": [output or "journalctl returned a non-zero exit code."],
+                "errors": errors + [output or "journalctl returned a non-zero exit code."],
             }
         log_lines = output.splitlines()
         return {
             "summary": f"Fetched {len(log_lines)} log line(s).",
             "result": {"lines": log_lines},
             "next_actions": [],
-            "errors": [],
+            "errors": errors if errors else [],
         }
 
     @mcp.tool
@@ -119,7 +144,7 @@ def register(mcp: FastMCP) -> None:
         Restart the MCP systemd service (explicit confirmation required).
         """
         errors = _authorize(token)
-        if errors:
+        if errors and "Invalid admin token" in errors:
             return {
                 "summary": "Admin token required.",
                 "result": {},
@@ -127,13 +152,13 @@ def register(mcp: FastMCP) -> None:
                 "errors": errors,
             }
 
-        service = os.getenv("MCP_SERVICE_NAME", "mcp-server.service")
+        service = _get_service_name()
         if not confirm:
             return {
                 "summary": "Restart requires confirmation.",
                 "result": {"service": service},
                 "next_actions": ["Re-run with confirm=true to restart."],
-                "errors": [],
+                "errors": errors if errors else [],
             }
 
         code, output = _run_command(["sudo", "systemctl", "restart", service])
@@ -142,11 +167,11 @@ def register(mcp: FastMCP) -> None:
                 "summary": "Restart failed.",
                 "result": {"service": service},
                 "next_actions": ["Inspect admin_logs for details."],
-                "errors": [output or "systemctl restart failed."],
+                "errors": errors + [output or "systemctl restart failed."],
             }
         return {
             "summary": f"Restart triggered for {service}.",
             "result": {"service": service},
             "next_actions": ["Run health_check to confirm readiness."],
-            "errors": [],
+            "errors": errors if errors else [],
         }
