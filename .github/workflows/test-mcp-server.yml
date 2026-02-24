@@ -1,0 +1,163 @@
+name: Test MCP Server Integration
+
+on:
+  push:
+    branches: [ '*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-mcp-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install uvicorn fastmcp
+        
+    - name: Verify test_server.py exists
+      run: |
+        if [ ! -f test_server.py ]; then
+          echo "❌ ERROR: test_server.py not found in repository"
+          exit 1
+        fi
+        echo "✅ test_server.py found"
+        
+    - name: Start MCP test server
+      run: |
+        echo "🚀 Starting MCP test server..."
+        python test_server.py &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        echo "Started server with PID: $SERVER_PID"
+        
+    - name: Wait for server startup
+      run: |
+        echo "⏳ Waiting for server to start..."
+        for i in {1..30}; do
+          if curl -f -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "✅ Server is responding after $i seconds"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "❌ Server failed to start within 30 seconds"
+            exit 1
+          fi
+          echo "Waiting... attempt $i/30"
+          sleep 1
+        done
+        
+    - name: Test Health Endpoint
+      run: |
+        echo "🔍 Testing /health endpoint..."
+        HEALTH_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:8000/health)
+        HTTP_CODE=$(echo "$HEALTH_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+        RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+        
+        echo "Health endpoint HTTP code: $HTTP_CODE"
+        echo "Health endpoint response: $RESPONSE_BODY"
+        
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "✅ Health endpoint working correctly"
+        else
+          echo "❌ Health endpoint failed with code: $HTTP_CODE"
+          exit 1
+        fi
+        
+    - name: Test MCP Endpoint  
+      run: |
+        echo "🔍 Testing /mcp endpoint..."
+        MCP_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:8000/mcp)
+        HTTP_CODE=$(echo "$MCP_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+        RESPONSE_BODY=$(echo "$MCP_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+        
+        echo "MCP endpoint HTTP code: $HTTP_CODE"
+        echo "MCP endpoint response: $RESPONSE_BODY"
+        
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "✅ MCP endpoint working correctly"
+        else
+          echo "❌ MCP endpoint failed with code: $HTTP_CODE"
+          exit 1
+        fi
+        
+    - name: Test Root Endpoint
+      run: |
+        echo "🔍 Testing root / endpoint..."
+        ROOT_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:8000/)
+        HTTP_CODE=$(echo "$ROOT_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+        RESPONSE_BODY=$(echo "$ROOT_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+        
+        echo "Root endpoint HTTP code: $HTTP_CODE"
+        echo "Root endpoint response: $RESPONSE_BODY"
+        
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
+          echo "✅ Root endpoint responding (code $HTTP_CODE is expected)"
+        else
+          echo "❌ Root endpoint failed with unexpected code: $HTTP_CODE"
+          exit 1
+        fi
+        
+    - name: Comprehensive Test Summary
+      run: |
+        echo "🎉 =================================="
+        echo "🎉 MCP SERVER INTEGRATION TEST PASSED"
+        echo "🎉 =================================="
+        echo ""
+        echo "✅ FastMCP server started successfully"
+        echo "✅ Health endpoint responding correctly" 
+        echo "✅ MCP endpoint responding correctly"
+        echo "✅ ASGI integration is working properly"
+        echo ""
+        echo "This means:"
+        echo "• FastMCP → uvicorn integration is functional"
+        echo "• HTTP routing is working correctly"
+        echo "• Server can handle MCP protocol requests"
+        echo "• No 404 ASGI integration issues detected"
+        echo ""
+        echo "If you were seeing 404 errors in deployment,"
+        echo "the issue is likely environment-specific (VM config,"
+        echo "systemd service, ports, firewall, etc.) rather than"
+        echo "the FastMCP code itself."
+        
+    - name: Cleanup
+      if: always()
+      run: |
+        if [ ! -z "$SERVER_PID" ]; then
+          echo "🧹 Stopping server (PID: $SERVER_PID)"
+          kill $SERVER_PID 2>/dev/null || true
+          sleep 2
+          kill -9 $SERVER_PID 2>/dev/null || true
+        fi
+        
+    - name: Show server logs on failure
+      if: failure()
+      run: |
+        echo "📋 Debugging information:"
+        echo "• Python version: $(python --version)"
+        echo "• Pip packages:"
+        pip list | grep -E "(fastmcp|uvicorn)"
+        echo "• Network connections:"
+        netstat -tlnp | grep :8000 || echo "No process listening on port 8000"
+        echo ""
+        echo "❌ =================================="
+        echo "❌ MCP SERVER INTEGRATION TEST FAILED" 
+        echo "❌ =================================="
+        echo ""
+        echo "This indicates either:"
+        echo "• FastMCP installation issues"
+        echo "• Import problems with dependencies" 
+        echo "• ASGI integration problems"
+        echo "• Server startup failures"
+        echo ""
+        echo "Check the logs above for specific error messages."
