@@ -1,3 +1,21 @@
-fastmcp
-httpx
-aiofiles
+# FastMCP Server Dependencies
+# ============================
+# All dependencies with version constraints for stability
+
+# Core MCP framework
+fastmcp>=3.0.0
+
+# HTTP server (CRITICAL - was missing!)
+uvicorn[standard]>=0.30.0
+
+# ASGI framework (used by FastMCP internally)
+starlette>=0.37.0
+
+# HTTP client for API calls
+httpx>=0.27.0
+
+# Async file operations
+aiofiles>=23.0.0
+
+# Environment variable loading from .env files
+python-dotenv>=1.0.0
