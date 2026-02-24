@@ -1,0 +1,312 @@
+name: Test Server Startup (Debug Branch)
+
+on:
+  push:
+    branches:
+      - debug-hardcoded-secrets
+  workflow_dispatch:
+    inputs:
+      wait_time:
+        description: 'Seconds to wait for server startup'
+        required: false
+        default: '10'
+        type: string
+
+jobs:
+  test-server-startup:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    
+    steps:
+      - name: 📥 Checkout debug-hardcoded-secrets branch
+        uses: actions/checkout@v4
+        with:
+          ref: debug-hardcoded-secrets
+      
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: 📦 Install dependencies from requirements.txt
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "Installing dependencies..."
+          echo "===================================="
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          echo ""
+          echo "===================================="
+          echo "Installed packages:"
+          echo "===================================="
+          pip list | grep -E '(fastmcp|uvicorn|starlette|httpx|aiofiles|dotenv)'
+      
+      - name: 🔍 Verify critical dependencies
+        run: |
+          echo "===================================="
+          echo "Verifying critical imports..."
+          echo "===================================="
+          python -c "import fastmcp; print('✅ fastmcp:', fastmcp.__version__)"
+          python -c "import uvicorn; print('✅ uvicorn:', uvicorn.__version__)"
+          python -c "import starlette; print('✅ starlette:', starlette.__version__)"
+          python -c "import httpx; print('✅ httpx:', httpx.__version__)"
+          python -c "import aiofiles; print('✅ aiofiles:', aiofiles.__version__)"
+          python -c "from dotenv import load_dotenv; print('✅ python-dotenv: OK')"
+          echo ""
+          echo "✅ All critical dependencies verified!"
+      
+      - name: 🚀 Start server in background
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "Starting server with hardcoded fallbacks..."
+          echo "No environment variables set (testing fallbacks)"
+          echo "===================================="
+          
+          # Start server in background, capturing output to file
+          nohup python server.py > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+          echo $SERVER_PID > server.pid
+          
+          echo ""
+          echo "Server started in background, PID: $SERVER_PID"
+      
+      - name: ⏳ Wait for server startup
+        run: |
+          WAIT_TIME=${{ inputs.wait_time || '10' }}
+          echo "===================================="
+          echo "Waiting ${WAIT_TIME} seconds for server to start..."
+          echo "===================================="
+          
+          # Wait and show progress
+          for i in $(seq 1 $WAIT_TIME); do
+            echo -n "."
+            sleep 1
+          done
+          echo ""
+          echo "Wait complete!"
+      
+      - name: ✅ Check server process is running
+        id: check_process
+        run: |
+          cd vm_server
+          SERVER_PID=$(cat server.pid)
+          
+          echo "===================================="
+          echo "Checking if server process is still alive..."
+          echo "===================================="
+          
+          if ps -p $SERVER_PID > /dev/null; then
+            echo "✅ SUCCESS: Server process $SERVER_PID is RUNNING!"
+            echo "status=running" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "❌ FAILED: Server process $SERVER_PID has EXITED!"
+            echo "status=exited" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: 📊 Show server startup logs
+        if: always()
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "SERVER STARTUP LOGS:"
+          echo "===================================="
+          if [ -f server.log ]; then
+            cat server.log
+          else
+            echo "❌ No server.log file found!"
+          fi
+          echo "===================================="
+      
+      - name: 🔍 Check for startup configuration display
+        if: always()
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "Checking for configuration display..."
+          echo "===================================="
+          
+          if grep -q "Lina Serendipity MCP Server Starting" server.log; then
+            echo "✅ Found server startup banner"
+          else
+            echo "⚠️  No startup banner found"
+          fi
+          
+          if grep -q "Secrets Status:" server.log; then
+            echo "✅ Found secrets status display"
+          else
+            echo "⚠️  No secrets status found"
+          fi
+          
+          if grep -q "hardcoded" server.log; then
+            echo "✅ Found hardcoded fallback indicators"
+          else
+            echo "⚠️  No hardcoded indicators found"
+          fi
+          
+          if grep -q "Tools registered successfully" server.log; then
+            echo "✅ Tools registered successfully"
+          else
+            echo "⚠️  Tool registration message not found"
+          fi
+          
+          if grep -q "Uvicorn running on" server.log; then
+            echo "✅ Uvicorn started successfully"
+          else
+            echo "⚠️  Uvicorn startup message not found"
+          fi
+      
+      - name: 🏥 Attempt health check
+        if: steps.check_process.outputs.status == 'running'
+        continue-on-error: true
+        run: |
+          echo "===================================="
+          echo "Attempting to connect to server..."
+          echo "===================================="
+          
+          # Give server a moment to bind to port
+          sleep 2
+          
+          # Try to connect to port 8000
+          if curl -f -s --max-time 5 http://localhost:8000/ > /dev/null 2>&1; then
+            echo "✅ Server responding on port 8000"
+            
+            # Try to get response
+            echo ""
+            echo "Server root response:"
+            curl -s http://localhost:8000/ || echo "(No response body)"
+          else
+            echo "⚠️  Could not connect to port 8000 (this may be expected)"
+            echo "   MCP servers may not respond to root path"
+          fi
+          
+          # Try MCP endpoint
+          if curl -f -s --max-time 5 http://localhost:8000/mcp > /dev/null 2>&1; then
+            echo "✅ Server responding on /mcp endpoint"
+          else
+            echo "⚠️  Could not connect to /mcp endpoint"
+          fi
+      
+      - name: 🔍 Check for errors in logs
+        if: always()
+        run: |
+          cd vm_server
+          echo "===================================="
+          echo "Checking for errors in logs..."
+          echo "===================================="
+          
+          if grep -i "error" server.log; then
+            echo "⚠️  Found error messages in logs (see above)"
+          else
+            echo "✅ No error messages found in logs"
+          fi
+          
+          if grep -i "traceback" server.log; then
+            echo "⚠️  Found traceback in logs (see above)"
+          else
+            echo "✅ No tracebacks found in logs"
+          fi
+          
+          if grep -i "ModuleNotFoundError" server.log; then
+            echo "❌ Found ModuleNotFoundError in logs"
+            exit 1
+          else
+            echo "✅ No ModuleNotFoundError found"
+          fi
+          
+          if grep -i "ImportError" server.log; then
+            echo "❌ Found ImportError in logs"
+            exit 1
+          else
+            echo "✅ No ImportError found"
+          fi
+      
+      - name: 📈 Show process info
+        if: always()
+        run: |
+          cd vm_server
+          if [ -f server.pid ]; then
+            SERVER_PID=$(cat server.pid)
+            echo "===================================="
+            echo "Process information for PID $SERVER_PID:"
+            echo "===================================="
+            ps aux | head -1
+            ps aux | grep $SERVER_PID | grep -v grep || echo "Process not found"
+          fi
+      
+      - name: 🧹 Cleanup - Stop server
+        if: always()
+        run: |
+          cd vm_server
+          if [ -f server.pid ]; then
+            SERVER_PID=$(cat server.pid)
+            echo "===================================="
+            echo "Stopping server (PID: $SERVER_PID)..."
+            echo "===================================="
+            kill $SERVER_PID 2>/dev/null || echo "Process already stopped"
+            sleep 2
+            # Force kill if still running
+            kill -9 $SERVER_PID 2>/dev/null || echo "Process terminated"
+            echo "✅ Cleanup complete"
+          fi
+      
+      - name: 📤 Upload server logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-python-${{ matrix.python-version }}
+          path: vm_server/server.log
+          retention-days: 7
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: test-server-startup
+    if: always()
+    steps:
+      - name: 📊 Generate test summary
+        run: |
+          echo "# 🧪 Server Startup Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Branch: debug-hardcoded-secrets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow tests that the server starts successfully with:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ All dependencies properly declared in requirements.txt" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Hardcoded fallback values for all environment variables" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Normal FastMCP routing (NUCLEAR OPTION removed)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ No exit code 1 failures" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## What This Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐍 Multiple Python versions (3.9, 3.10, 3.11)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 Dependency installation from requirements.txt" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔧 Critical imports (uvicorn, starlette, dotenv)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🚀 Server startup without environment variables" >> $GITHUB_STEP_SUMMARY
+          echo "- ⏱️ Server stays alive (no immediate crash)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Configuration display with hardcoded indicators" >> $GITHUB_STEP_SUMMARY
+          echo "- 🛠️ Tool registration success" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Expected Behavior" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Success Criteria:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Server process starts and stays running" >> $GITHUB_STEP_SUMMARY
+          echo "- No ModuleNotFoundError or ImportError" >> $GITHUB_STEP_SUMMARY
+          echo "- Startup logs show configuration with 'hardcoded' indicators" >> $GITHUB_STEP_SUMMARY
+          echo "- Tools register successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- Uvicorn starts and binds to port 8000" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **If Tests Fail:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Check server logs artifact for error details" >> $GITHUB_STEP_SUMMARY
+          echo "- Look for import errors → dependency issue" >> $GITHUB_STEP_SUMMARY
+          echo "- Look for syntax errors → code issue" >> $GITHUB_STEP_SUMMARY
+          echo "- Look for runtime errors → logic issue" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 Download server logs from the 'Artifacts' section above for detailed debugging." >> $GITHUB_STEP_SUMMARY
