@@ -5,7 +5,14 @@ import os
 import httpx
 from fastmcp import FastMCP
 
-SERENDIPITY_WEBHOOK = os.getenv("SERENDIPITY_EVENT_WEBHOOK_URL")
+# HARDCODED FALLBACK for debugging (DO NOT USE IN PRODUCTION!)
+DEBUG_SERENDIPITY_WEBHOOK = "http://localhost:5678/webhook/debug-serendipity"
+
+def _get_serendipity_webhook() -> str:
+    """Get serendipity webhook URL with hardcoded fallback for debugging."""
+    return os.getenv("SERENDIPITY_EVENT_WEBHOOK_URL", DEBUG_SERENDIPITY_WEBHOOK)
+
+SERENDIPITY_WEBHOOK = _get_serendipity_webhook()
 
 
 def register(mcp: FastMCP) -> None:
@@ -30,11 +37,26 @@ def register(mcp: FastMCP) -> None:
 
         Data is forwarded to your n8n `serendipity-event` webhook.
         """
-
-        if not SERENDIPITY_WEBHOOK:
+        
+        webhook_url = _get_serendipity_webhook()
+        
+        # Check if using debug webhook
+        if webhook_url == DEBUG_SERENDIPITY_WEBHOOK:
             return {
                 "ok": False,
-                "error": "SERENDIPITY_EVENT_WEBHOOK_URL is not set on the MCP server",
+                "debug_mode": True,
+                "error": "⚠️  Using DEBUG webhook URL - set SERENDIPITY_EVENT_WEBHOOK_URL environment variable for real n8n integration",
+                "would_have_sent": {
+                    "event_timestamp": event_timestamp,
+                    "mood_timestamp": mood_timestamp,
+                    "mood_input": mood_input,
+                    "source": source,
+                    "event_type": event_type,
+                    "message_to_user": message_to_user,
+                    "poke_action": poke_action,
+                    "poke_reason": poke_reason,
+                    "tags": tags or [],
+                }
             }
 
         # Whatever Poke passes, we send as-is.
@@ -52,7 +74,7 @@ def register(mcp: FastMCP) -> None:
 
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(SERENDIPITY_WEBHOOK, json=payload)
+                resp = await client.post(webhook_url, json=payload)
         except Exception as exc:
             return {
                 "ok": False,
@@ -183,10 +205,10 @@ def register(mcp: FastMCP) -> None:
         if is_anxious or is_overstim:
             nudge_title = "60-second sensory reset"
             nudge_body = (
-                "Let’s do a 60-second reset:\n"
-                "• Put one hand on your chest, one on your belly.\n"
-                "• Breathe in through your nose for 4, out for 6.\n"
-                "• On each exhale, tell yourself: “Nothing to fix right now, just exhale.”\n\n"
+                "Let's do a 60-second reset:\\n"
+                "• Put one hand on your chest, one on your belly.\\n"
+                "• Breathe in through your nose for 4, out for 6.\\n"
+                "• On each exhale, tell yourself: "Nothing to fix right now, just exhale."\\n\\n"
                 "You can stop after one minute. No pressure to do more."
             )
             estimated_duration = 2
@@ -200,11 +222,11 @@ def register(mcp: FastMCP) -> None:
         elif is_low and is_evening:
             nudge_title = "Cozy 5-minute nest"
             nudge_body = (
-                "Make a tiny 5-minute pocket of comfort:\n"
-                "• Dim one light or switch to a warmer lamp.\n"
-                "• Add one soft thing (blanket, pillow, hoodie).\n"
-                "• Put on one gentle song you like.\n\n"
-                "Nothing else required. Just let your body register “we’re safe and cozy” for one track."
+                "Make a tiny 5-minute pocket of comfort:\\n"
+                "• Dim one light or switch to a warmer lamp.\\n"
+                "• Add one soft thing (blanket, pillow, hoodie).\\n"
+                "• Put on one gentle song you like.\\n\\n"
+                "Nothing else required. Just let your body register "we're safe and cozy" for one track."
             )
             estimated_duration = 5
             friction_level = "low"
@@ -216,11 +238,11 @@ def register(mcp: FastMCP) -> None:
         elif is_low:
             nudge_title = "One soft body kindness"
             nudge_body = (
-                "Offer your body one small kindness:\n"
-                "• Sip a glass of water or warm tea, or\n"
-                "• Stretch your shoulders + neck for 30 seconds, or\n"
-                "• Stand up, shake out your hands for 20 seconds.\n\n"
-                "Pick exactly one and then you’re done."
+                "Offer your body one small kindness:\\n"
+                "• Sip a glass of water or warm tea, or\\n"
+                "• Stretch your shoulders + neck for 30 seconds, or\\n"
+                "• Stand up, shake out your hands for 20 seconds.\\n\\n"
+                "Pick exactly one and then you're done."
             )
             estimated_duration = 3
             friction_level = "ultra_low"
@@ -233,11 +255,11 @@ def register(mcp: FastMCP) -> None:
         elif is_flat and at_home:
             nudge_title = "2-minute home micro-adventure"
             nudge_body = (
-                "Do a tiny home micro-adventure:\n"
-                "• Walk to a window you don’t usually look out of.\n"
-                "• Notice one small detail outside that you’ve never really looked at.\n"
-                "• Give it a silly or poetic name.\n\n"
-                "Then come back. That’s it."
+                "Do a tiny home micro-adventure:\\n"
+                "• Walk to a window you don't usually look out of.\\n"
+                "• Notice one small detail outside that you've never really looked at.\\n"
+                "• Give it a silly or poetic name.\\n\\n"
+                "Then come back. That's it."
             )
             estimated_duration = 3
             friction_level = "low"
@@ -250,10 +272,10 @@ def register(mcp: FastMCP) -> None:
         elif is_curious:
             nudge_title = "Follow-the-thread for 5 minutes"
             nudge_body = (
-                "You seem a bit curious. Try a 5-minute follow-the-thread:\n"
-                "• Pick one thought, idea, or question that’s been hovering.\n"
-                "• Open a note and write 5 bullet points about it: no structure, just fragments.\n"
-                "• Stop after 5 minutes, even if you’re mid-thought.\n\n"
+                "You seem a bit curious. Try a 5-minute follow-the-thread:\\n"
+                "• Pick one thought, idea, or question that's been hovering.\\n"
+                "• Open a note and write 5 bullet points about it: no structure, just fragments.\\n"
+                "• Stop after 5 minutes, even if you're mid-thought.\\n\\n"
                 "This is about capturing the spark, not finishing anything."
             )
             estimated_duration = 5
@@ -267,10 +289,10 @@ def register(mcp: FastMCP) -> None:
         elif is_evening:
             nudge_title = "Three-line evening snapshot"
             nudge_body = (
-                "Capture today in three lines:\n"
-                "1) One thing your body experienced today.\n"
-                "2) One small moment you want to keep.\n"
-                "3) One thing future-you doesn’t need to carry from today.\n\n"
+                "Capture today in three lines:\\n"
+                "1) One thing your body experienced today.\\n"
+                "2) One small moment you want to keep.\\n"
+                "3) One thing future-you doesn't need to carry from today.\\n\\n"
                 "Write them anywhere; no need to be deep or polished."
             )
             estimated_duration = 4
@@ -284,11 +306,11 @@ def register(mcp: FastMCP) -> None:
         elif is_morning:
             nudge_title = "Gentle 3-step morning check-in"
             nudge_body = (
-                "Quick 3-step check-in for this morning:\n"
-                "• Notice one sensation in your body right now.\n"
-                "• Name one thing that is completely optional today.\n"
-                "• Name one thing that would feel like “enough” if you did only that.\n\n"
-                "You don’t have to act on any of it yet; just name them."
+                "Quick 3-step check-in for this morning:\\n"
+                "• Notice one sensation in your body right now.\\n"
+                "• Name one thing that is completely optional today.\\n"
+                "• Name one thing that would feel like "enough" if you did only that.\\n\\n"
+                "You don't have to act on any of it yet; just name them."
             )
             estimated_duration = 4
             friction_level = "low"
