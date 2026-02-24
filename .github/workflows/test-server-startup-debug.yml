@@ -51,14 +51,52 @@ jobs:
           echo "===================================="
           echo "Verifying critical imports..."
           echo "===================================="
-          python -c "import fastmcp; print('✅ fastmcp:', fastmcp.__version__)"
-          python -c "import uvicorn; print('✅ uvicorn:', uvicorn.__version__)"
-          python -c "import starlette; print('✅ starlette:', starlette.__version__)"
-          python -c "import httpx; print('✅ httpx:', httpx.__version__)"
-          python -c "import aiofiles; print('✅ aiofiles:', aiofiles.__version__)"
-          python -c "from dotenv import load_dotenv; print('✅ python-dotenv: OK')"
-          echo ""
-          echo "✅ All critical dependencies verified!"
+          
+          # Helper function to get version safely
+          python << 'EOF'
+          import sys
+          
+          def get_version(module_name):
+              """Get version of a module, handling missing __version__ attribute."""
+              try:
+                  mod = __import__(module_name)
+                  # Try __version__ first
+                  if hasattr(mod, '__version__'):
+                      return mod.__version__
+                  # Fall back to importlib.metadata
+                  try:
+                      from importlib.metadata import version
+                      return version(module_name)
+                  except Exception:
+                      # If all else fails, just confirm it imports
+                      return "installed"
+              except ImportError as e:
+                  print(f"❌ {module_name}: NOT FOUND - {e}")
+                  sys.exit(1)
+          
+          # Check each dependency
+          packages = [
+              ('fastmcp', 'fastmcp'),
+              ('uvicorn', 'uvicorn'),
+              ('starlette', 'starlette'),
+              ('httpx', 'httpx'),
+              ('aiofiles', 'aiofiles'),
+          ]
+          
+          for display_name, module_name in packages:
+              ver = get_version(module_name)
+              print(f"✅ {display_name}: {ver}")
+          
+          # Special case for python-dotenv
+          try:
+              from dotenv import load_dotenv
+              print("✅ python-dotenv: OK")
+          except ImportError as e:
+              print(f"❌ python-dotenv: NOT FOUND - {e}")
+              sys.exit(1)
+          
+          print("\n✅ All critical dependencies verified!")
+          EOF
       
       - name: 🚀 Start server in background
         run: |
