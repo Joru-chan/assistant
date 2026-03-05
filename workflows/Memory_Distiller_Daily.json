@@ -1,7 +1,7 @@
 {
   "name": "Memory Distiller Daily",
   "description": null,
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
