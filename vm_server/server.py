@@ -47,6 +47,7 @@ if __name__ == "__main__":
     
     mcp.run(
         transport="streamable-http",
+        stateless_http=True,
         host="0.0.0.0",
         port=port,
     )
